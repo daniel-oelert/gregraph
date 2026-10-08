@@ -1,0 +1,40 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Design description with drivers, alternatives, and consequences",
+  "name": "design",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Description",
+      "placeholder": "Describe the design and its key elements.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Decision drivers",
+      "placeholder": "List the forces and goals driving this design.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Alternatives considered",
+      "placeholder": "List the alternatives that were considered and why they were rejected.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Consequences",
+      "placeholder": "Describe the consequences of this design.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add supporting notes, links, or open questions.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,40 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Test case with preconditions, steps, and expected result",
+  "name": "test-case",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Objective",
+      "placeholder": "State what this test case verifies.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Preconditions",
+      "placeholder": "List the state required before the test runs.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Steps",
+      "placeholder": "List the steps to execute.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Expected result",
+      "placeholder": "Describe the expected outcome.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add supporting notes, links, or open questions.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,34 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Decision record with context and consequences",
+  "name": "decision",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Context",
+      "placeholder": "Describe the situation that calls for a decision.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Decision",
+      "placeholder": "State the decision that was made.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Consequences",
+      "placeholder": "Describe the consequences of this decision.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Alternatives considered",
+      "placeholder": "List the alternatives that were considered and why they were rejected.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

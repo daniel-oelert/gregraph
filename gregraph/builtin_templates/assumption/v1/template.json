@@ -1,0 +1,34 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Assumption with impact and validation plan",
+  "name": "assumption",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Assumption",
+      "placeholder": "State the assumption in one clear sentence.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Impact if false",
+      "placeholder": "Describe what happens if the assumption does not hold.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Validation plan",
+      "placeholder": "Describe how and when the assumption will be checked.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add supporting notes, links, or open questions.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

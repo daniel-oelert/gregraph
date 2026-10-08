@@ -1,0 +1,34 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Constraint with source and rationale",
+  "name": "constraint",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Constraint",
+      "placeholder": "State the constraint in one clear sentence.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Source",
+      "placeholder": "Name the source of this constraint.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Rationale",
+      "placeholder": "Explain why this constraint applies.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add supporting notes, links, or open questions.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

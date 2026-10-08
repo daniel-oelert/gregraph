@@ -1,0 +1,34 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Goal with rationale and success indicators",
+  "name": "goal",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Goal",
+      "placeholder": "State the goal in one or two sentences.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Rationale",
+      "placeholder": "Explain why this goal is worth pursuing.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Success indicators",
+      "placeholder": "List observable indicators that the goal has been achieved.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add supporting notes, links, or open questions.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

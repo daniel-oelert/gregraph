@@ -1,0 +1,34 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Stakeholder role with interests and contact",
+  "name": "stakeholder",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Role",
+      "placeholder": "Name the stakeholder or stakeholder group.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Interests",
+      "placeholder": "Describe what this stakeholder cares about.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Contact",
+      "placeholder": "Give contact details for this stakeholder.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add supporting notes, links, or open questions.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

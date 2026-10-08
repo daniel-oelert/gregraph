@@ -1,0 +1,34 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "User story with Gherkin acceptance criteria",
+  "name": "user-story",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Story",
+      "placeholder": "As a <role>, I want <capability>, so that <benefit>.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Acceptance criteria",
+      "placeholder": "Given … When … Then …",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Rationale",
+      "placeholder": "Explain why this story matters.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add supporting notes, links, or open questions.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

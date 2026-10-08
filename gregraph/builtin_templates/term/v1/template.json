@@ -1,0 +1,22 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Glossary term definition",
+  "name": "term",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Definition",
+      "placeholder": "Define the term in one or two sentences.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add usage notes, aliases, or related terms.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

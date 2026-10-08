@@ -1,0 +1,34 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Project context with rationale and scope boundaries",
+  "name": "context",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Context",
+      "placeholder": "Describe the situation and the system this context covers.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Rationale",
+      "placeholder": "Explain why this context matters and what it enables.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Assumptions",
+      "placeholder": "List the assumptions this context rests on.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Out of scope",
+      "placeholder": "State what this context explicitly does not cover.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

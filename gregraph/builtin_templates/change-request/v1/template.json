@@ -1,0 +1,40 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Change request with motivation, proposed change, and impact",
+  "name": "change-request",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Motivation",
+      "placeholder": "Explain why a change is needed.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Proposed change",
+      "placeholder": "Describe the proposed change.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Impact",
+      "placeholder": "Describe the impact of the change on existing documents and links.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Resolution",
+      "placeholder": "Record how this change request was resolved.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add supporting notes, links, or open questions.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}

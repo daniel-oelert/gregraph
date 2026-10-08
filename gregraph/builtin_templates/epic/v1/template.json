@@ -1,0 +1,34 @@
+{
+  "breaking": false,
+  "deprecated": false,
+  "description": "Epic hypothesis with rationale and scope",
+  "name": "epic",
+  "schema": 1,
+  "sections": [
+    {
+      "heading": "Hypothesis",
+      "placeholder": "For <users> who <need>, <epic> will <outcome>. We will know this is true when <indicator>.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Rationale",
+      "placeholder": "Explain why this hypothesis is plausible and worth testing.",
+      "renamed_from": [],
+      "required": true
+    },
+    {
+      "heading": "Scope",
+      "placeholder": "State what is inside this epic's scope.",
+      "renamed_from": [],
+      "required": false
+    },
+    {
+      "heading": "Notes",
+      "placeholder": "Add supporting notes, links, or open questions.",
+      "renamed_from": [],
+      "required": false
+    }
+  ],
+  "version": 1
+}
