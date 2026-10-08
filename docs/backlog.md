@@ -503,3 +503,28 @@ can slip through the hook's block; "newly outdated" is defined against
 re-run past the block without a refresh. Confirm the staged-content reading
 of §7.2 and the HEAD-relative definition of "newly outdated by the commit in
 progress" (§7.1 refinement 2).
+
+## Release gate notes (S21)
+
+Process notes and deferrals from closing out v0.1.0 (spec §17, §16.4,
+appendix C definition of done minus M6). No behaviour changes were needed.
+
+The workspace had no VCS history during S0–S20, so the implementation lands
+as one import commit and the milestone tags `m1`–`m5` (spec §18) all point at
+the release commit; each tag message records the milestone's acceptance row.
+A history-savvy maintainer may re-tag if a reconstructed milestone history is
+ever materialised.
+
+`pipx run gregraph --version` as written in the S21 brief resolves the bare
+name from PyPI. gregraph 0.1.0 is not published to an index (spec §16.4
+requires `pip install .` / `pipx install .` installability, not an index
+release), so the smoke was run as `pipx run --spec . gregraph --version`
+against the local checkout, and `pipx install .` + running the installed
+console script covers the installed-artifact path. Publishing to PyPI
+remains an open release-engineering decision for v0.2.
+
+The CI matrix (Linux/macOS/Windows × 3.12/3.13) is defined in
+`.github/workflows/ci.yml`. The full quality gate was verified in this
+sandbox on Linux for both 3.12 and 3.13 (ruff check/format, `mypy --strict`,
+pytest); the macOS and Windows legs cannot be executed here and are verified
+by the first CI run against the `v0.1.0` tag.
