@@ -1895,7 +1895,8 @@ def init_repository(
         notices.append("git not found on PATH; skipping git init and hook installation")
     else:
         adapter = GitAdapter(root)
-        if not adapter.is_repo():
+        owns_repo = adapter.is_repo() and adapter.root() == root
+        if not owns_repo:
             started = _git_run(root, "init", "-b", baseline_branch)
             if started.returncode != 0:
                 started = _git_run(root, "init")
@@ -1906,7 +1907,9 @@ def init_repository(
             git_initialised = started.returncode == 0
             if not git_initialised:
                 notices.append("git init failed; continuing without a repository")
-        if git_initialised or GitAdapter(root).is_repo():
+        if git_initialised or (
+            GitAdapter(root).is_repo() and GitAdapter(root).root() == root
+        ):
             hooks.install(root)
             hooks_installed = True
         else:

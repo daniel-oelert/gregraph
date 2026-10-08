@@ -141,6 +141,34 @@ def test_init_in_existing_git_repo_installs_hooks_only(tmp_path: Path) -> None:
     assert (target / ".git" / "hooks" / "pre-commit").is_file()
 
 
+def test_init_in_subdirectory_of_worktree_creates_own_repository(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    subprocess.run(
+        ["git", "init", "-b", "main"], cwd=outer, check=True, capture_output=True
+    )
+    target = outer / "nested"
+    assert main(["init", str(target)]) == 0
+    head = (target / ".git" / "HEAD").read_text(encoding="utf-8")
+    assert "refs/heads/main" in head
+    hook = target / ".git" / "hooks" / "pre-commit"
+    assert hook.is_file()
+    assert "gregraph hook pre-commit" in hook.read_text(encoding="utf-8")
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=target,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert Path(result.stdout.strip()).resolve() == target.resolve()
+    assert not (outer / ".git" / "hooks" / "pre-commit").exists()
+
+
 def test_init_invalid_prefix_is_usage_error(tmp_path: Path, capsys) -> None:
     assert (
         main(["init", str(tmp_path / "repo"), "--prefix", "bad prefix", "--no-git"])
