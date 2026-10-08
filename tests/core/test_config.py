@@ -38,7 +38,7 @@ B1_TYPES: dict[str, tuple[str, str]] = {
 B1_TOML = """\
 [gregraph]
 config_schema = 1
-tool_version = "0.1.0"
+tool_version = "0.1.1"
 
 [ids]
 prefix = "RE"
@@ -118,7 +118,7 @@ deciders = []
 def test_defaults_match_appendix_b1() -> None:
     config = Config()
     assert config.gregraph.config_schema == 1
-    assert config.gregraph.tool_version == "0.1.0"
+    assert config.gregraph.tool_version == "0.1.1"
     assert config.ids.prefix == "RE"
     assert config.git.baseline_branch == "main"
     assert config.versioning.on_outdated_links == "block"
@@ -304,7 +304,7 @@ def test_dumps_toml_shape() -> None:
     text = dumps_toml(Config())
     assert text.endswith("\n")
     assert "[gregraph]\n" in text
-    assert 'tool_version = "0.1.0"\n' in text
+    assert 'tool_version = "0.1.1"\n' in text
     assert 'prefix = "RE"\n' in text
     assert 'baseline_branch = "main"\n' in text
     assert 'on_outdated_links = "block"\n' in text

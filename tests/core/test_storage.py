@@ -445,7 +445,7 @@ def test_cache_round_trip(tmp_repo: Path) -> None:
     loaded = load_cache(tmp_repo)
     assert loaded == cache
     assert loaded.schema_ == 1
-    assert loaded.tool_version == "0.1.0"
+    assert loaded.tool_version == "0.1.1"
 
 
 def test_cache_absent_rebuilds_silently(tmp_repo: Path) -> None:

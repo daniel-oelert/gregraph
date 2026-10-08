@@ -1,6 +1,6 @@
 # GREGraph CLI reference
 
-Every command, flag, exit code and interactive behaviour of GREGraph v0.1.0.
+Every command, flag, exit code and interactive behaviour of GREGraph v0.1.1.
 The normative specification is `docs/design.md` §13; this document describes
 the implemented surface. When the two disagree, the spec wins and this file
 needs an update.
