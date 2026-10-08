@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -15,10 +16,18 @@ import pytest
 
 import gregraph
 from gregraph.cli.main import main
+from gregraph.core.config import Config, dumps_toml
 
 
 def test_version_attribute() -> None:
     assert gregraph.__version__ == "0.1.0"
+
+
+def test_version_consistent_across_packaging_and_config() -> None:
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert data["project"]["version"] == gregraph.__version__
+    assert f'tool_version = "{gregraph.__version__}"\n' in dumps_toml(Config())
 
 
 def test_main_version(capsys: pytest.CaptureFixture[str]) -> None:
