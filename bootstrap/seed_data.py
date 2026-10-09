@@ -1099,8 +1099,8 @@ TESTCASES = [
         "Verify: supersede accepts multiple targets",
         {
             "Objective": (
-                "Verify that multi-target supersession creates one document with one "
-                "`supersedes` edge per target."
+                "Verify that supersession with multiple targets creates one document "
+                "with one `supersedes` edge per target."
             ),
             "Preconditions": "Documents A and B of the same kind.",
             "Steps": 'Run `gregraph supersede A B --title "Replacement"`.',
@@ -1177,8 +1177,9 @@ TESTCASES = [
         "Verify: scope entries record base versions",
         {
             "Objective": (
-                "Verify that adding a scope entry records the target's baseline-branch "
-                "version as base version, changed only through `gregraph cr reanalyze`."
+                "Verify that adding a scope entry records the target's version on the "
+                "baseline branch as base version, changed only through "
+                "`gregraph cr reanalyze`."
             ),
             "Preconditions": (
                 "A change request; target X at version 2 on the baseline branch."
