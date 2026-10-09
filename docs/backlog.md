@@ -528,3 +528,58 @@ The CI matrix (Linux/macOS/Windows × 3.12/3.13) is defined in
 sandbox on Linux for both 3.12 and 3.13 (ruff check/format, `mypy --strict`,
 pytest); the macOS and Windows legs cannot be executed here and are verified
 by the first CI run against the `v0.1.0` tag.
+
+## Dogfooding findings (S22 / M6)
+
+Seeding `gregraph-requirements` per design §19 with the released tool (79
+documents, 83 links from appendix A, commits through the pre-commit hook,
+`validate --strict` clean). The hook's blocking path worked as designed
+(BOOT-108 aborted one commit and printed the offending findings). One
+blocking spec violation was found and fixed in 0.1.1; the rest is deferred.
+
+FIXED in 0.1.1 — `init` inside an enclosing Git work tree skipped `git init`
+and installed a dead hook (spec §13.1, BOOT-100). `GitAdapter.is_repo()`
+answers "is inside a work tree", so a nested directory already looked like a
+repository; `hooks.install` then fabricated `PATH/.git/hooks/pre-commit`,
+which real Git never executes. The first seeding attempt therefore committed
+all content into the *tool* repository and never ran the gregraph hook.
+`init_repository` now treats PATH as a repository only when it is the Git
+toplevel of its own repository and runs `git init` otherwise. Regression
+test: `tests/cli/test_init.py::`\
+`test_init_in_subdirectory_of_worktree_creates_own_repository`.
+
+SPEC-QUESTION (new; dogfooding): mention detection treats any ID-shaped
+token as an ID mention (§4.5 matching is case-insensitive), so hyphenated
+prose whose second half happens to be six Crockford characters — e.g.
+"multi-target", "baseline-branch" — fires `E-MENTION-UNKNOWN` and the
+pre-commit hook blocks the commit. This blocked one M6 seed commit; worked
+around by rewording the prose. Should mention scanning require the
+configured prefix, an existing ID body, or the canonical uppercase form?
+§5.2's "mentions a document ID" is ambiguous for hyphenated prose.
+
+SPEC-QUESTION (confirmation of the §7.4 effective-version question above):
+the M6 seeding hit the `E-LINK-VERSION-AHEAD` vs effective-version
+contradiction in a pure CLI run — `link`/`new --link` records
+`target_version = version + 1` while a target has unbumped modifications,
+which `validate` reports as an *error* until the hook bumps the target.
+Seeding ordered content commits before link commits to avoid it; no
+behaviour change in 0.1.1.
+
+SPEC-QUESTION (new): `GitAdapter.is_repo()` is documented as "Whether the
+working directory root is a Git repository" but implements "is inside a
+work tree". For a workspace that is a subdirectory of a foreign work tree,
+`hooks install` writes the block into the *foreign* repository's hooks dir,
+where githooks' toplevel cwd rule means `gregraph hook pre-commit` cannot
+discover the workspace and would exit 3 on every foreign commit. v0.1.1
+narrows the supported configuration to one gregraph repository per Git
+repository root; should `hooks install`/`hook pre-commit` refuse non-root
+workspaces, or should the hook script embed `--repo`? Related: should
+`hook pre-commit` exit 0 ("nothing to reconcile", as its core function
+already reports) instead of the §13 exit-3 "no repository found" when
+invoked outside a gregraph repository? Deferred.
+
+Observation (no action): a document created with `new` and then filled in
+lands at version 2 in its first hook commit (the stored v1 hash is the
+template skeleton's; §7.2's hash-based bump at the first commit is
+correct). The v1 skeleton is never committed. A body input on `new` (flag or
+stdin) would let version 1 be the real content; v0.2 idea.
