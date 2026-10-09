@@ -1,0 +1,3 @@
+[submodule "gregraph-requirements"]
+	path = gregraph-requirements
+	url = ./gregraph-requirements
