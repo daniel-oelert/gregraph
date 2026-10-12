@@ -1,4 +1,4 @@
-"""``gregraph baseline`` (spec §13.21, §12.4): baseline tags.
+"""``gregraph baseline``: baseline tags.
 
 A baseline is an annotated Git tag ``baseline/<name>`` whose message holds a
 generated manifest (ID, version, body_hash, status per document). ``create``

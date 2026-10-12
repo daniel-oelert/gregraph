@@ -1,5 +1,5 @@
-"""Core domain layer (spec §16.2).
+"""Core domain layer
 
-Never imports from ``gregraph.cli``, never prints: returns results and
+Never prints: returns results and
 ``Finding`` objects. All Git access goes through ``git.py`` via subprocess.
 """

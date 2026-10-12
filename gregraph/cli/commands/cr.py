@@ -1,6 +1,6 @@
-"""``gregraph cr`` (spec §13.18, §9): change requests.
+"""``gregraph cr``: change requests.
 
-CRs are first-class entities outside the graph (§9.1) with scope, base
+CRs are first-class entities outside the graph with scope, base
 versions, origin tracking and a decision history. Commands refuse
 ``E-CR-DISABLED`` while ``cr.enabled = false``. ``show`` is the §9.8 impact
 view; ``list`` filters on proposed/effective status, pending decisions or

@@ -1,4 +1,4 @@
-"""Shared command-module helpers (spec §16.1: thin parse → core → format).
+"""Shared command-module helpers
 
 Every command module exposes ``run(args: argparse.Namespace, app: App) -> int``
 (contract of :mod:`gregraph.cli.main`). Interactive selection happens before

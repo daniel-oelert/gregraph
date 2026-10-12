@@ -154,7 +154,7 @@ class Output:
         print(self.palette.warn(f"warning: {text}"), file=self.stderr)
 
     def note(self, text: str) -> None:
-        """Degraded-mode note on stderr (spec §12.1); suppressed by ``--quiet``."""
+        """Degraded-mode note on stderr; suppressed by ``--quiet``."""
         if self.quiet:
             return
         print(self.palette.dim(f"note: {text}"), file=self.stderr)
@@ -164,17 +164,17 @@ class Output:
         print(self.palette.error(f"error: {text}"), file=self.stderr)
 
     def finding(self, finding: Finding) -> None:
-        """One refusal/validation finding on stderr (spec §13)."""
+        """One refusal/validation finding on stderr."""
         print(format_finding(finding, palette=self.palette), file=self.stderr)
 
     def report(self, findings: Iterable[Finding]) -> None:
-        """The validation-style report on stdout (spec §13.9), one per line."""
+        """The validation-style report on stdout, one per line."""
         palette = self.palette
         for finding in findings:
             print(format_finding(finding, palette=palette), file=self.stdout)
 
     def table(self, headers: Sequence[str], rows: Sequence[Sequence[str]]) -> None:
-        """Aligned table on stdout (``list``, spec §13.10)."""
+        """Aligned table on stdout (``list``)."""
         text = format_table(headers, rows)
         if self.palette.enabled:
             first, _, rest = text.partition("\n")

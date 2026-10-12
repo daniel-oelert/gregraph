@@ -91,7 +91,7 @@ class _Parser(argparse.ArgumentParser):
 
 @dataclass
 class App:
-    """Per-invocation context handed to every command module (spec §13)."""
+    """Per-invocation context handed to every command module."""
 
     out: Output
     repo: Path | None = None
@@ -100,11 +100,11 @@ class App:
 
     @property
     def interactive(self) -> bool:
-        """Prompts only on a TTY and without ``--no-input`` (spec §13)."""
+        """Prompts only on a TTY and without ``--no-input``."""
         return not self.no_input and _stdin_isatty()
 
     def open_workspace(self) -> Workspace:
-        """Open the repository (spec §3): ``--repo`` is the root, else discover.
+        """Open the repository: ``--repo`` is the root, else discover.
 
         Raises ``FileNotFoundError`` when there is no repository — mapped to
         exit code 3 by :func:`main`.
@@ -131,7 +131,7 @@ class App:
         return Workspace(root=root, config=config, git=NullGitAdapter())
 
     def note(self, feature: str) -> None:
-        """Degraded-mode note, at most once per invocation (spec §12.1)."""
+        """Degraded-mode note, at most once per invocation."""
         message = self.notes.take(feature)
         if message is not None:
             self.out.note(message.removeprefix("note: "))
@@ -202,7 +202,6 @@ def _add_command(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The full §13 command tree (spec §13 general rules, §16.1)."""
     parents = [_global_parent()]
     parser = _Parser(
         prog="gregraph",
@@ -213,7 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="command")
 
     init = _add_command(
-        subparsers, parents, "init", "create a requirements repository (spec §13.1)"
+        subparsers, parents, "init", "create a requirements repository"
     )
     init.add_argument("path", nargs="?", default=".", help="directory to initialise")
     init.add_argument("--prefix", default="RE", metavar="RE", help="document ID prefix")
@@ -233,7 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-git", action="store_true", help="skip git init and hook installation"
     )
 
-    new = _add_command(subparsers, parents, "new", "create a document (spec §13.2)")
+    new = _add_command(subparsers, parents, "new", "create a document")
     new.add_argument("type", nargs="?", default=None, help="document type")
     new.add_argument(
         "--title", default=None, metavar="T", help="document title (the H1)"
@@ -274,12 +273,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--edit", action="store_true", help="open the document in $VISUAL/$EDITOR"
     )
 
-    link = _add_command(subparsers, parents, "link", "add an edge (spec §13.3)")
+    link = _add_command(subparsers, parents, "link", "add an edge")
     link.add_argument("source", nargs="?", default=None, help="source document ID")
     link.add_argument("type", nargs="?", default=None, help="edge type")
     link.add_argument("target", nargs="?", default=None, help="target document ID")
     link.epilog = (
-        "edge guidelines (spec §6.1):\n"
+        "edge guidelines:\n"
         '- Ask "if the target were deleted, would the source still make sense '
         'as written?" If no and the source is a more concrete version of the '
         "target -> refines. If no and the source is a different requirement "
@@ -291,12 +290,11 @@ def build_parser() -> argparse.ArgumentParser:
         "- relates-to is the last resort.\n"
         "\n"
         "see `gregraph link refresh --help` for refreshing link versions "
-        "(spec §13.5)"
     )
     link.formatter_class = argparse.RawDescriptionHelpFormatter
 
     refresh = _add_command(
-        subparsers, parents, "link-refresh", "link refresh (spec §13.5)", hidden=True
+        subparsers, parents, "link-refresh", "link refresh", hidden=True
     )
     refresh.add_argument("source", nargs="?", default=None, help="source document ID")
     refresh.add_argument("type", nargs="?", default=None, help="edge type")
@@ -317,13 +315,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     refresh.add_argument("--dry-run", action="store_true", help="report only")
 
-    unlink = _add_command(subparsers, parents, "unlink", "remove an edge (spec §13.4)")
+    unlink = _add_command(subparsers, parents, "unlink", "remove an edge")
     unlink.add_argument("source", nargs="?", default=None, help="source document ID")
     unlink.add_argument("type", nargs="?", default=None, help="edge type")
     unlink.add_argument("target", nargs="?", default=None, help="target document ID")
 
     set_command = _add_command(
-        subparsers, parents, "set", "set tags or extra fields (spec §13.6)"
+        subparsers, parents, "set", "set tags or extra fields"
     )
     set_command.add_argument("id", nargs="?", default=None, help="document ID")
     set_command.add_argument(
@@ -334,17 +332,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="tags=…/tags+=…/tags-=…/extra.name=…",
     )
 
-    sync = _add_command(subparsers, parents, "sync", "reconcile all (spec §13.7)")
+    sync = _add_command(subparsers, parents, "sync", "reconcile all")
     sync.add_argument(
         "--bump", action="store_true", help="bump versions of modified documents"
     )
 
     _add_command(
-        subparsers, parents, "check", "simulate the pre-commit hook (spec §13.8)"
+        subparsers, parents, "check", "simulate the pre-commit hook"
     )
 
     validate = _add_command(
-        subparsers, parents, "validate", "run validation (spec §13.9)"
+        subparsers, parents, "validate", "run validation"
     )
     validate.add_argument(
         "--strict", action="store_true", help="treat warnings as errors"
@@ -354,7 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     list_command = _add_command(
-        subparsers, parents, "list", "list documents (spec §13.10)"
+        subparsers, parents, "list", "list documents"
     )
     list_command.add_argument(
         "--type",
@@ -408,7 +406,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="sort key",
     )
 
-    show = _add_command(subparsers, parents, "show", "show one document (spec §13.11)")
+    show = _add_command(subparsers, parents, "show", "show one document")
     show.add_argument("id", nargs="?", default=None, help="document (or CR) ID")
     show.add_argument(
         "--body", action="store_true", help="also print the Markdown body"
@@ -425,14 +423,14 @@ def build_parser() -> argparse.ArgumentParser:
         subparsers,
         parents,
         "edit",
-        "open the Markdown in $VISUAL/$EDITOR (spec §13.23)",
+        "open the Markdown in $VISUAL/$EDITOR",
     )
     edit.add_argument("id", nargs="?", default=None, help="document ID")
 
-    _add_command(subparsers, parents, "status", "repository status (spec §13.12)")
+    _add_command(subparsers, parents, "status", "repository status")
 
     graph = _add_command(
-        subparsers, parents, "graph", "export a Mermaid graph (spec §13.13)"
+        subparsers, parents, "graph", "export a Mermaid graph"
     )
     graph.add_argument(
         "--root",
@@ -471,7 +469,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     supersede = _add_command(
-        subparsers, parents, "supersede", "replace documents (spec §13.14)"
+        subparsers, parents, "supersede", "replace documents"
     )
     supersede.add_argument(
         "old", nargs="*", default=[], metavar="OLD", help="document(s) to supersede"
@@ -502,7 +500,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     deprecate = _add_command(
-        subparsers, parents, "deprecate", "deprecate a document (spec §13.15)"
+        subparsers, parents, "deprecate", "deprecate a document"
     )
     deprecate.add_argument("id", nargs="?", default=None, help="document ID")
     deprecate.add_argument(
@@ -510,12 +508,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     undeprecate = _add_command(
-        subparsers, parents, "undeprecate", "undo a deprecation (spec §13.15)"
+        subparsers, parents, "undeprecate", "undo a deprecation"
     )
     undeprecate.add_argument("id", nargs="?", default=None, help="document ID")
 
     migrate = _add_command(
-        subparsers, parents, "migrate", "migrate template versions (spec §13.16)"
+        subparsers, parents, "migrate", "migrate template versions"
     )
     migrate.add_argument(
         "ids", nargs="*", default=[], metavar="ID", help="documents to migrate"
@@ -541,7 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--dry-run", action="store_true", help="print the plan only")
 
     template = _add_command(
-        subparsers, parents, "template", "manage templates (spec §13.17)"
+        subparsers, parents, "template", "manage templates"
     )
     template_cmds = template.add_subparsers(dest="template_cmd", metavar="subcommand")
     template_cmds.add_parser("list", parents=parents, help="list template versions")
@@ -566,7 +564,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--version", type=int, default=None, metavar="N", help="version to show"
     )
 
-    cr = _add_command(subparsers, parents, "cr", "change requests (spec §13.18)")
+    cr = _add_command(subparsers, parents, "cr", "change requests")
     cr_cmds = cr.add_subparsers(dest="cr_cmd", metavar="subcommand")
     cr_new = cr_cmds.add_parser("new", parents=parents, help="create a change request")
     cr_new.add_argument("--title", default=None, metavar="T", help="CR title")
@@ -634,7 +632,7 @@ def build_parser() -> argparse.ArgumentParser:
     cr_show.add_argument("cr", metavar="CR", help="change request ID")
 
     repair = _add_command(
-        subparsers, parents, "repair", "repair damaged data (spec §13.19)"
+        subparsers, parents, "repair", "repair damaged data"
     )
     repair_cmds = repair.add_subparsers(dest="repair_cmd", metavar="subcommand")
     repair_cmds.add_parser(
@@ -648,7 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cache", parents=parents, help="delete and rebuild the cache"
     )
 
-    term = _add_command(subparsers, parents, "term", "glossary terms (spec §13.20)")
+    term = _add_command(subparsers, parents, "term", "glossary terms")
     term_cmds = term.add_subparsers(dest="term_cmd", metavar="subcommand")
     term_add = term_cmds.add_parser("add", parents=parents, help="add a term")
     term_add.add_argument("term", metavar="Term", help="term text")
@@ -677,7 +675,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     baseline = _add_command(
-        subparsers, parents, "baseline", "baseline tags (spec §13.21)"
+        subparsers, parents, "baseline", "baseline tags"
     )
     baseline_cmds = baseline.add_subparsers(dest="baseline_cmd", metavar="subcommand")
     baseline_create = baseline_cmds.add_parser(
@@ -689,7 +687,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     baseline_cmds.add_parser("list", parents=parents, help="list baseline tags")
 
-    hooks = _add_command(subparsers, parents, "hooks", "manage Git hooks (spec §13.22)")
+    hooks = _add_command(subparsers, parents, "hooks", "manage Git hooks")
     hooks_cmds = hooks.add_subparsers(dest="hooks_cmd", metavar="subcommand")
     hooks_cmds.add_parser(
         "install", parents=parents, help="install the pre-commit hook"
@@ -705,7 +703,7 @@ def build_parser() -> argparse.ArgumentParser:
         subparsers,
         parents,
         "hook",
-        "internal hook entry points (spec §13.22)",
+        "internal hook entry points",
         hidden=True,
     )
     hook_cmds = hook.add_subparsers(dest="hook_cmd", metavar="subcommand")
@@ -769,7 +767,7 @@ def _load_command(key: str) -> ModuleType:
         if exc.name == module_name:
             label = key.replace("-", " ")
             raise NotImplementedError(
-                f"`gregraph {label}` is not implemented yet (planned for S18/S19)"
+                f"`gregraph {label}` is not implemented yet"
             ) from exc
         raise
 
@@ -781,7 +779,7 @@ def _dispatch(args: argparse.Namespace, app: App) -> int:
     if run is None:
         label = key.replace("-", " ")
         raise NotImplementedError(
-            f"`gregraph {label}` is not implemented yet (planned for S18/S19)"
+            f"`gregraph {label}` is not implemented yet"
         )
     return int(run(args, app))
 
@@ -789,7 +787,7 @@ def _dispatch(args: argparse.Namespace, app: App) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``gregraph`` console script and ``python -m gregraph``.
 
-    Returns the exit code (spec §13); ``--help``/``--version`` raise
+    Returns the exit code; ``--help``/``--version`` raise
     ``SystemExit`` as argparse does.
     """
     raw = list(sys.argv[1:]) if argv is None else list(argv)
