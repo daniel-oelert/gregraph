@@ -64,7 +64,7 @@ revert, or discard changes unless the user explicitly requested that operation.
   fixes, then verify the affected behavior. Inspect important diffs yourself for
   spec compliance, cross-module integration, and unresolved correctness risks.
 - Delegate application verification using the repository's checks:
-  `ruff check . && ruff format --check . && mypy --strict gregraph && pytest`.
+  `ruff check . && ruff format --check . && mypy --strict -p gregraph && pytest`.
   Use the project's environment and require exact commands, exit codes, and
   relevant output as evidence. For configuration-only changes, validate the
   relevant configuration instead.

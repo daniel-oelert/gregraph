@@ -29,19 +29,22 @@ GREGraph v0.1.0 implements the design in [`docs/design.md`](docs/design.md).
 
 ## Install
 
-From a checkout of this repository:
+GREGraph ships as two distributions from this repository's `packages/`
+directory, released in lockstep: `gregraph-core` (the library) and
+`gregraph-cli` (the `gregraph` command, which depends on `gregraph-core`).
+
+From a checkout, install both:
 
 ```
-pip install .
+python -m pip install ./packages/core ./packages/cli
 ```
 
-or isolated, as a CLI:
+This provides the `gregraph` command (`python -m gregraph` also works).
+Installing only `./packages/core` gives the library without the command.
 
-```
-pipx install .
-```
-
-Either provides the `gregraph` command (`python -m gregraph` also works).
+The distributions are not yet published to an index. Once they are, the
+same install is `pip install gregraph-cli`, or `pipx install gregraph-cli`
+for an isolated CLI, and `pip install gregraph-core` gives the library only.
 
 ## Quickstart
 
@@ -81,9 +84,21 @@ equivalents for scripting (`--no-input` disables prompting entirely).
 
 ```
 python -m venv .venv && . .venv/bin/activate
-pip install -e .[dev]
-ruff check . && ruff format --check . && mypy --strict gregraph && pytest
+python -m pip install --upgrade pip        # pip >= 25.1 is needed for --group
+python -m pip install --group dev -e packages/core -e packages/cli
+ruff check . && ruff format --check . && mypy --strict -p gregraph && pytest
 ```
+
+To build both wheels into `dist/`:
+
+```
+python -m pip wheel --no-build-isolation --no-deps ./packages/core ./packages/cli -w dist
+```
+
+The root `pyproject.toml` is tooling-only (dependency groups and tool
+configuration); the packages are built from `packages/core` and
+`packages/cli`. Packaging and layout are described in `docs/design.md`
+§16.1 and §16.4.
 
 The quality gate must pass before every commit; see
 [`AGENTS.md`](AGENTS.md) for the ground rules and layout.

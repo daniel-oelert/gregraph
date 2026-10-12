@@ -17,7 +17,14 @@ from jinja2.sandbox import SandboxedEnvironment
 from gregraph.core.models import TemplateDescriptor
 from gregraph.core.storage import canonical_json_bytes
 
-BUILTIN_ROOT = Path(__file__).resolve().parents[1] / "gregraph" / "builtin_templates"
+BUILTIN_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "packages"
+    / "core"
+    / "src"
+    / "gregraph"
+    / "builtin_templates"
+)
 
 # Appendix B.2: "Sections (required in bold)".
 EXPECTED_SECTIONS: dict[str, list[tuple[str, bool]]] = {

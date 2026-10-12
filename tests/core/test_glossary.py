@@ -60,7 +60,13 @@ from gregraph.core.workspace import Workspace
 CREATED = dt.datetime(2026, 9, 10, 14, 2, 11, tzinfo=dt.UTC)
 GLOSSARY = Path("glossary")
 BUILTIN_TERM_TEMPLATE = (
-    Path(__file__).resolve().parents[2] / "gregraph" / "builtin_templates" / "term"
+    Path(__file__).resolve().parents[2]
+    / "packages"
+    / "core"
+    / "src"
+    / "gregraph"
+    / "builtin_templates"
+    / "term"
 )
 
 S14_CODES: dict[str, str] = {

@@ -140,10 +140,13 @@ def test_link_help_prints_edge_guidelines(capsys: pytest.CaptureFixture[str]) ->
         main(["link", "--help"])
     assert excinfo.value.code == 0
     text = capsys.readouterr().out
-    assert "edge guidelines (spec §6.1)" in text
+    assert "edge guidelines:" in text
     assert "refines" in text
     assert "derives-from" in text
+    assert "depends-on" in text
     assert "constrains" in text
+    assert "Never model quality attributes as children" in text
+    assert "A design node never refines a requirement" in text
     assert "relates-to is the last resort" in text
 
 

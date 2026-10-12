@@ -25,8 +25,10 @@ def test_version_attribute() -> None:
 
 def test_version_consistent_across_packaging_and_config() -> None:
     root = Path(__file__).resolve().parents[1]
-    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-    assert data["project"]["version"] == gregraph.__version__
+    for dist in ("core", "cli"):
+        path = root / "packages" / dist / "pyproject.toml"
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        assert data["project"]["version"] == gregraph.__version__, dist
     assert f'tool_version = "{gregraph.__version__}"\n' in dumps_toml(Config())
 
 
@@ -49,9 +51,9 @@ def test_python_dash_m_version() -> None:
 
 def test_console_script_entry_point() -> None:
     scripts = entry_points(group="console_scripts")
-    assert any(
-        ep.name == "gregraph" and ep.value == "gregraph.cli.main:main" for ep in scripts
-    )
+    gregraph_scripts = [ep for ep in scripts if ep.name == "gregraph"]
+    assert [ep.value for ep in gregraph_scripts] == ["gregraph.cli.main:main"]
+    assert [ep.dist.name for ep in gregraph_scripts if ep.dist] == ["gregraph-cli"]
 
 
 def test_tmp_repo_layout(tmp_repo: Path) -> None:

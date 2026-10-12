@@ -965,39 +965,50 @@ Severity **E** = error (exit 1; blocks hook), **W** = warning.
 
 ### 16.1 Package layout
 
+The repository holds two distributions (§16.4) under `packages/`. Both install into the shared import package `gregraph`.
+
 ```
-gregraph/
-├── __init__.py            # __version__
-├── __main__.py            # python -m gregraph → cli.main
-├── cli/
-│   ├── __init__.py
-│   ├── main.py            # argparse tree, exit-code mapping
-│   ├── commands/          # one module per top-level command; thin: parse → call core → format
-│   ├── prompts.py         # TTY prompts, pickers (stdlib only)
-│   └── output.py          # text/JSON formatters, colour handling
-├── core/
-│   ├── __init__.py
-│   ├── workspace.py       # Workspace: root discovery, config, index, git adapter, entry point for all operations
-│   ├── config.py          # config.toml model (pydantic), defaults, type definitions
-│   ├── ids.py             # UUID → ID, prefix rules, parsing
-│   ├── models.py          # pydantic models: Document, Link, ChangeRequest, ScopeEntry, Decision, Term, TemplateDescriptor, Identity, Finding
-│   ├── storage.py         # file I/O: paths, canonical JSON, reading/writing documents, terms, cache
-│   ├── markdown.py        # body normalisation, H1 extraction, section parsing, mention detection, asset refs (markdown-it-py)
-│   ├── hashing.py         # body/asset hashing
-│   ├── templates.py       # template loading, rendering (jinja2), version resolution, migration planning
-│   ├── graph.py           # in-memory graph: nodes, edges, inbound index, cycle check, reachability, kind rules
-│   ├── rules.py           # edge-type table and kind rules (data, not logic)
-│   ├── status.py          # derived status, WIP
-│   ├── versioning.py      # reconcile(), freshness computation, effective versions
-│   ├── changes.py         # change requests: scope, base versions, drift, origin, effective status
-│   ├── validation.py      # findings catalogue and checks
-│   ├── operations.py      # use-cases: create_document, link, unlink, refresh, supersede, deprecate, migrate, cr_*, term_*, baseline
-│   ├── git.py             # GitAdapter / NullGitAdapter
-│   ├── mermaid.py         # export
-│   └── hooks.py           # hook script generation, install/uninstall
-└── builtin_templates/     # shipped templates, copied by init (package data)
-    └── <name>/v1/template.md, template.json
+pyproject.toml                     # tooling only (no [project]): dev dependency group, ruff/mypy/pytest config
+packages/
+├── core/                          # distribution gregraph-core (pyproject.toml, hatchling)
+│   └── src/gregraph/
+│       ├── __init__.py            # __version__; pkgutil.extend_path (shared namespace, §16.4)
+│       ├── core/
+│       │   ├── __init__.py
+│       │   ├── workspace.py       # Workspace: root discovery, config, index, git adapter, entry point for all operations
+│       │   ├── config.py          # config.toml model (pydantic), defaults, type definitions
+│       │   ├── ids.py             # UUID → ID, prefix rules, parsing
+│       │   ├── models.py          # pydantic models: Document, Link, ChangeRequest, ScopeEntry, Decision, Term, TemplateDescriptor, Identity, Finding
+│       │   ├── storage.py         # file I/O: paths, canonical JSON, reading/writing documents, terms, cache
+│       │   ├── markdown.py        # body normalisation, H1 extraction, section parsing, mention detection, asset refs (markdown-it-py)
+│       │   ├── hashing.py         # body/asset hashing
+│       │   ├── templates.py       # template loading, rendering (jinja2), version resolution, migration planning
+│       │   ├── graph.py           # in-memory graph: nodes, edges, inbound index, cycle check, reachability, kind rules
+│       │   ├── rules.py           # edge-type table and kind rules (data, not logic)
+│       │   ├── status.py          # derived status, WIP
+│       │   ├── versioning.py      # reconcile(), freshness computation, effective versions
+│       │   ├── changes.py         # change requests: scope, base versions, drift, origin, effective status
+│       │   ├── validation.py      # findings catalogue and checks
+│       │   ├── operations.py      # use-cases: create_document, link, unlink, refresh, supersede, deprecate, migrate, cr_*, term_*, baseline
+│       │   ├── git.py             # GitAdapter / NullGitAdapter
+│       │   ├── mermaid.py         # export
+│       │   └── hooks.py           # hook script generation, install/uninstall
+│       └── builtin_templates/     # shipped templates, copied by init (package data)
+│           └── <name>/v1/template.md, template.json
+└── cli/                           # distribution gregraph-cli (pyproject.toml, hatchling)
+    └── src/gregraph/              # no __init__.py here: gregraph is shared with gregraph-core
+        ├── __main__.py            # python -m gregraph → cli.main
+        └── cli/
+            ├── __init__.py
+            ├── main.py            # argparse tree, exit-code mapping
+            ├── commands/          # one module per top-level command; thin: parse → call core → format
+            ├── prompts.py         # TTY prompts, pickers (stdlib only)
+            └── output.py          # text/JSON formatters, colour handling
 ```
+
+Tests live in the root `tests/` tree, mirroring `packages/core/src/gregraph/core/` (`tests/core/`) and `packages/cli/src/gregraph/cli/` (`tests/cli/`).
+
+The two wheels install no overlapping files: `gregraph/__init__.py` is provided only by `gregraph-core`, and `gregraph-cli` contributes `gregraph/__main__.py` and `gregraph/cli/` only.
 
 ### 16.2 Boundaries and rules
 
@@ -1016,15 +1027,29 @@ Runtime: `pydantic>=2`, `jinja2>=3`, `markdown-it-py>=3` (with `mdit-py-plugins`
 
 Deliberately not used: Rich/Typer/Click (argparse suffices and keeps the dependency footprint small), GitPython/pygit2 (shell-out), networkx (the graph operations needed — DFS reachability, Kahn's algorithm, inbound index — are ~100 lines and avoid a large dependency).
 
-Development: `pytest`, `pytest-cov`, `hypothesis`, `ruff`, `mypy`, `pre-commit` (for the tool's own repo).
+Development: `pytest`, `pytest-cov`, `hypothesis`, `ruff`, `mypy`, `pre-commit`, `hatchling` (for the tool's own repo; the root `dev` dependency group, §16.4). Packaging does not change the runtime footprint: `gregraph-cli` adds only `gregraph-core`.
 
 ### 16.4 Packaging
 
-- `pyproject.toml` with `[build-system] requires = ["hatchling"]` (or setuptools; agent's choice, documented). Package data must include `builtin_templates/**`.
-- `[project.scripts] gregraph = "gregraph.cli.main:main"`.
-- `requires-python = ">=3.12"`.
-- Installable with `pip install .` and `pipx install .`.
-- Semantic versioning; `0.1.0` is the first release.
+The product ships as two distributions built from `packages/` and released in lockstep (same version number at every release; currently `0.1.1`). The original single-distribution packaging (`gregraph` with one `pyproject.toml` at the root) is superseded; the reason is recorded in `docs/decisions.md` (D-PACKAGE-SPLIT).
+
+| Distribution | Source | Provides | Runtime dependencies |
+|---|---|---|---|
+| `gregraph-core` | `packages/core` | `gregraph.core`, `gregraph.__version__`, `builtin_templates/**` (package data) | `pydantic>=2`, `jinja2>=3`, `markdown-it-py>=3`, `mdit-py-plugins` |
+| `gregraph-cli` | `packages/cli` | `gregraph.cli`, `python -m gregraph`, console script `gregraph = "gregraph.cli.main:main"` | `gregraph-core==<same version>` |
+
+- Both distributions use `[build-system] requires = ["hatchling"]` and a `src/` layout. `requires-python = ">=3.12"`.
+- Shared namespace: `packages/core/src/gregraph/__init__.py` defines `__version__` and calls `pkgutil.extend_path(__path__, __name__)`, so `gregraph.cli` from `gregraph-cli` is found beside `gregraph.core`. The `gregraph` package thus stays importable as `from gregraph import __version__` in both installs. `packages/cli/src/gregraph/` has no `__init__.py`.
+- Lockstep: `gregraph-cli` pins `gregraph-core==X.Y.Z` to the same release. Version bumps change both `pyproject.toml` files together, and `__version__` in `gregraph-core` matches.
+- Installation:
+  - Published (intended usage; not yet on an index): `pip install gregraph-cli` or `pipx install gregraph-cli`, providing the `gregraph` command and `python -m gregraph`. `pip install gregraph-core` gives the library only (`gregraph.core`, `gregraph.__version__`) with no CLI.
+  - Local regular install from a checkout, for either path: `python -m pip install ./packages/core ./packages/cli`.
+  - Developer install (pip 25.1 or later is needed for `--group`): `python -m pip install --upgrade pip`, then `python -m pip install --group dev -e packages/core -e packages/cli`.
+- Build both wheels from the developer environment (it provides hatchling): `python -m pip wheel --no-build-isolation --no-deps ./packages/core ./packages/cli -w dist`.
+- The root `pyproject.toml` is tooling-only. It has no `[project]` table, so there is no root distribution and no root installation (`pip install .` at the root is unsupported). It carries the `dev` dependency group (`pytest`, `pytest-cov`, `hypothesis`, `ruff`, `mypy`, `pre-commit`, `hatchling`), the ruff, mypy and pytest configuration, and `mypy_path` covering both source roots, so the quality gate runs as `mypy --strict -p gregraph`.
+- Quality gate (before every commit): `ruff check . && ruff format --check . && mypy --strict -p gregraph && pytest`.
+- Package data: `packages/core` must include `builtin_templates/**`.
+- Semantic versioning. `0.1.0` was the first release.
 
 ### 16.5 Cache
 
@@ -1423,15 +1448,15 @@ the spec wins; open an issue noting the discrepancy.
 - Python >= 3.12. Runtime deps: pydantic, jinja2, markdown-it-py (+ mdit-py-plugins). Nothing else
   without a note in docs/decisions.md explaining why.
 - `core` never prints and never imports `cli`. `cli` never touches the filesystem directly.
-- Every CLI command maps to one function in `gregraph/core/operations.py`.
+- Every CLI command maps to one function in `packages/core/src/gregraph/core/operations.py`.
 - Findings are data (`Finding`), not exceptions. Refusals raise `OperationRefused(finding)`.
-- All Git access goes through `gregraph/core/git.py` via subprocess. No Git libraries.
+- All Git access goes through `packages/core/src/gregraph/core/git.py` via subprocess. No Git libraries.
 - Canonical JSON: `indent=2, ensure_ascii=False, sort_keys=True`, trailing newline, links sorted.
 - Paths in models are repository-relative `pathlib.Path`; only `storage.py` makes them absolute.
 
 ## Workflow
 - Test first: write the failing test, then the code. Every validation code in spec §14 has a test.
-- Run `ruff check . && ruff format --check . && mypy --strict gregraph && pytest` before every commit.
+- Run `ruff check . && ruff format --check . && mypy --strict -p gregraph && pytest` before every commit.
 - One commit per coherent change; commit message subject <= 72 chars, body explains why.
   Reference the spec section touched, e.g. "graph: reject cross-type cycles (spec §6.2)".
 - Milestones are in spec §18. Finish and tag a milestone before starting the next.
@@ -1439,11 +1464,15 @@ the spec wins; open an issue noting the discrepancy.
 - Windows matters: use `pathlib`, never string paths; normalise line endings on read.
 
 ## Layout
-See spec §16.1. Tests live in `tests/` mirroring `gregraph/core/` modules; CLI tests in
-`tests/cli/` invoke `gregraph.cli.main.main([...])` and use the `tmp_repo` fixture.
+See spec §16.1 and §16.4. Two distributions live under `packages/` (`gregraph-core`,
+`gregraph-cli`) sharing the `gregraph` import package; the root `pyproject.toml` is
+tooling-only. Tests live in `tests/` mirroring `packages/core/src/gregraph/core/` (`tests/core/`)
+and `packages/cli/src/gregraph/cli/` (`tests/cli/`); CLI tests invoke
+`gregraph.cli.main.main([...])` and use the `tmp_repo` fixture. Dev setup is in README.md.
 
 ## Definition of done for v0.1
 All milestones M1–M5 tagged, CI green on Linux/macOS/Windows, coverage >= 90% for core,
-`docs/cli.md` and `docs/concepts.md` written, `pip install .` and `pipx install .` verified,
+`docs/cli.md` and `docs/concepts.md` written, both distributions installed
+(`python -m pip install ./packages/core ./packages/cli`; published `pip`/`pipx install gregraph-cli`) verified,
 and the tool has been used to initialise the `gregraph-requirements` repository (M6).
 ```

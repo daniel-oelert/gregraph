@@ -206,3 +206,26 @@ trailing newline); `list --json` emits a bare array of sidecars plus derived
 (fix: …)` and map to exit 4; ValueError maps to exit 2, OSError and missing
 repositories to exit 3, NotImplementedError (not-yet-written S18/S19 command
 modules) to exit 5.
+
+### D-PACKAGE-SPLIT
+
+Supersedes the single-distribution packaging of spec §16.4 by explicit user
+instruction (lockstep versions, currently 0.1.1). (1) Two distributions under
+`packages/`: `gregraph-core` (library, runtime deps unchanged) and `gregraph-cli`
+(console script, `python -m gregraph`, depends on `gregraph-core==<same version>`).
+The import names `gregraph.core`, `gregraph.cli`, `from gregraph import __version__`
+and the `gregraph` command are preserved. (2) The shared `gregraph` namespace is a
+regular package: `packages/core/src/gregraph/__init__.py` owns `__version__` and
+calls `pkgutil.extend_path`; `gregraph-cli` ships no `__init__.py` at that level,
+so the wheels install no overlapping files. PEP 420 implicit namespace packages
+were rejected because they cannot provide `__version__` from `gregraph/__init__.py`
+without a second owner of that file. (3) The root `pyproject.toml` is tooling-only
+(no `[project]`): dev tools live in the `dev` dependency group, installed with
+`python -m pip install --group dev -e packages/core -e packages/cli`, which needs
+pip 25.1 or later. The quality gate uses `mypy --strict -p gregraph`, with both
+source roots on `mypy_path`. (4) No root umbrella install is supported. Spike
+verified: core-only imports and resources work; core-only CLI is unavailable
+as intended. Published `pipx install gregraph-cli` is intended usage and was not
+verified against an index. (5) Dev tooling: the root `dev` group carries
+`hatchling`, the existing build backend, so local `--no-build-isolation` wheel builds
+work; it is a development dependency only, not a new runtime dependency.

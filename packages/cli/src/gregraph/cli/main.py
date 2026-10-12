@@ -211,9 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     subparsers = parser.add_subparsers(dest="command", metavar="command")
 
-    init = _add_command(
-        subparsers, parents, "init", "create a requirements repository"
-    )
+    init = _add_command(subparsers, parents, "init", "create a requirements repository")
     init.add_argument("path", nargs="?", default=".", help="directory to initialise")
     init.add_argument("--prefix", default="RE", metavar="RE", help="document ID prefix")
     init.add_argument(
@@ -320,9 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     unlink.add_argument("type", nargs="?", default=None, help="edge type")
     unlink.add_argument("target", nargs="?", default=None, help="target document ID")
 
-    set_command = _add_command(
-        subparsers, parents, "set", "set tags or extra fields"
-    )
+    set_command = _add_command(subparsers, parents, "set", "set tags or extra fields")
     set_command.add_argument("id", nargs="?", default=None, help="document ID")
     set_command.add_argument(
         "assignments",
@@ -337,13 +333,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--bump", action="store_true", help="bump versions of modified documents"
     )
 
-    _add_command(
-        subparsers, parents, "check", "simulate the pre-commit hook"
-    )
+    _add_command(subparsers, parents, "check", "simulate the pre-commit hook")
 
-    validate = _add_command(
-        subparsers, parents, "validate", "run validation"
-    )
+    validate = _add_command(subparsers, parents, "validate", "run validation")
     validate.add_argument(
         "--strict", action="store_true", help="treat warnings as errors"
     )
@@ -351,9 +343,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--only-errors", action="store_true", help="report errors only"
     )
 
-    list_command = _add_command(
-        subparsers, parents, "list", "list documents"
-    )
+    list_command = _add_command(subparsers, parents, "list", "list documents")
     list_command.add_argument(
         "--type",
         action="append",
@@ -429,9 +419,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_command(subparsers, parents, "status", "repository status")
 
-    graph = _add_command(
-        subparsers, parents, "graph", "export a Mermaid graph"
-    )
+    graph = _add_command(subparsers, parents, "graph", "export a Mermaid graph")
     graph.add_argument(
         "--root",
         action="append",
@@ -468,9 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="write to FILE instead of stdout",
     )
 
-    supersede = _add_command(
-        subparsers, parents, "supersede", "replace documents"
-    )
+    supersede = _add_command(subparsers, parents, "supersede", "replace documents")
     supersede.add_argument(
         "old", nargs="*", default=[], metavar="OLD", help="document(s) to supersede"
     )
@@ -499,22 +485,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--edit", action="store_true", help="open the new document in $VISUAL/$EDITOR"
     )
 
-    deprecate = _add_command(
-        subparsers, parents, "deprecate", "deprecate a document"
-    )
+    deprecate = _add_command(subparsers, parents, "deprecate", "deprecate a document")
     deprecate.add_argument("id", nargs="?", default=None, help="document ID")
     deprecate.add_argument(
         "--reason", default=None, metavar="R", help="deprecation reason"
     )
 
-    undeprecate = _add_command(
-        subparsers, parents, "undeprecate", "undo a deprecation"
-    )
+    undeprecate = _add_command(subparsers, parents, "undeprecate", "undo a deprecation")
     undeprecate.add_argument("id", nargs="?", default=None, help="document ID")
 
-    migrate = _add_command(
-        subparsers, parents, "migrate", "migrate template versions"
-    )
+    migrate = _add_command(subparsers, parents, "migrate", "migrate template versions")
     migrate.add_argument(
         "ids", nargs="*", default=[], metavar="ID", help="documents to migrate"
     )
@@ -538,9 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     migrate.add_argument("--dry-run", action="store_true", help="print the plan only")
 
-    template = _add_command(
-        subparsers, parents, "template", "manage templates"
-    )
+    template = _add_command(subparsers, parents, "template", "manage templates")
     template_cmds = template.add_subparsers(dest="template_cmd", metavar="subcommand")
     template_cmds.add_parser("list", parents=parents, help="list template versions")
     template_add = template_cmds.add_parser(
@@ -631,9 +609,7 @@ def build_parser() -> argparse.ArgumentParser:
     cr_show = cr_cmds.add_parser("show", parents=parents, help="show a change request")
     cr_show.add_argument("cr", metavar="CR", help="change request ID")
 
-    repair = _add_command(
-        subparsers, parents, "repair", "repair damaged data"
-    )
+    repair = _add_command(subparsers, parents, "repair", "repair damaged data")
     repair_cmds = repair.add_subparsers(dest="repair_cmd", metavar="subcommand")
     repair_cmds.add_parser(
         "versions", parents=parents, help="recompute versions of conflicted sidecars"
@@ -674,9 +650,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--reason", default=None, metavar="R", help="deprecation reason"
     )
 
-    baseline = _add_command(
-        subparsers, parents, "baseline", "baseline tags"
-    )
+    baseline = _add_command(subparsers, parents, "baseline", "baseline tags")
     baseline_cmds = baseline.add_subparsers(dest="baseline_cmd", metavar="subcommand")
     baseline_create = baseline_cmds.add_parser(
         "create", parents=parents, help="create a baseline tag"
@@ -778,9 +752,7 @@ def _dispatch(args: argparse.Namespace, app: App) -> int:
     run = getattr(module, "run", None)
     if run is None:
         label = key.replace("-", " ")
-        raise NotImplementedError(
-            f"`gregraph {label}` is not implemented yet"
-        )
+        raise NotImplementedError(f"`gregraph {label}` is not implemented yet")
     return int(run(args, app))
 
 

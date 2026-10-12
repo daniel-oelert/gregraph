@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gregraph-cli"
+version = "0.1.1"
+description = "Local, Git-aware requirements management CLI"
+requires-python = ">=3.12"
+dependencies = [
+    "gregraph-core==0.1.1",
+]
+
+[project.scripts]
+gregraph = "gregraph.cli.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gregraph"]
