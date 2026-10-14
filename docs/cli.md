@@ -1,6 +1,7 @@
 # GREGraph CLI reference
 
-Every command, flag, exit code and interactive behaviour of GREGraph v0.1.1.
+Every command, flag, exit code and interactive behaviour of GREGraph v0.1.1,
+plus the `serve` command of the optional `gregraph-webui` distribution.
 The normative specification is `docs/design.md` §13; this document describes
 the implemented surface. When the two disagree, the spec wins and this file
 needs an update.
@@ -19,7 +20,8 @@ gregraph [global options] <command> [subcommand] [args] [options]
 
 Also available as `python -m gregraph`. Global options work before or after
 the command. `gregraph` without a command prints help and exits 2;
-`--help`/`--version` exit 0.
+`--help`/`--version` exit 0. The `serve` command exists only when the optional
+`gregraph-webui` distribution is installed (see [`serve`](#serve)).
 
 ### Global options
 
@@ -562,6 +564,72 @@ gregraph edit [ID]
 Opens the Markdown body in `$VISUAL`/`$EDITOR` (prompted picker when ID is
 missing). Convenience only; prints nothing on success.
 
+### `serve`
+
+```
+gregraph [global options] serve [--host HOST] [--port PORT]
+```
+
+Starts the local web UI in the foreground. **Available only when the optional
+`gregraph-webui` distribution is installed** (`pip install gregraph-webui`, or
+`python -m pip install ./packages/core ./packages/cli ./packages/webui` from a
+checkout). Without it `serve` is not a command: it is a usage error (exit 2)
+with a hint to install `gregraph-webui`, and it does not appear in `--help`.
+`--help` never loads the web UI code.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--host HOST` | `127.0.0.1` | Loopback address to bind. Accepted values are exactly `127.0.0.1`, `localhost` and `::1`. Any other value is a usage error (exit 2) and no socket is opened. There is no option to listen on other interfaces. |
+| `--port PORT` | `8765` | TCP port, integer from 1 to 65535. Otherwise a usage error (exit 2). |
+
+- The repository is discovered as for every command (`--repo`, or upward from
+  the current directory). No repository → exit 3.
+- On start it prints the banner
+  `GREGraph UI: http://127.0.0.1:8765/` (IPv6: `http://[::1]:8765/`) followed by
+  `Press Ctrl-C to stop.`. Open the URL in a browser yourself; `serve` does not
+  open one. The URL carries no token: the web application owns its token
+  (`docs/design.md` §21.4).
+- Ctrl-C stops the server and exits 0.
+- A port that cannot be bound (for example, it is in use) exits 3, with a
+  message that suggests `--port`.
+- Only the repository's own files are read or written, through the core
+  operations. The server accepts requests only from the local machine. Every HTTP
+  request is checked for `Host`, `Origin` and `Fetch-Site`, and mutating requests
+  must send the application's token header. These guards only stop web pages in
+  your browser. They do not protect against other local users or programs, which
+  can already read the repository directly (`docs/design.md` §21.4).
+- `serve` is a foreground process, not a daemon or service. The global
+  `--json`, `--no-input` and `-q` options have no effect on it; `--repo` applies.
+
+See `docs/webui.md` for what the web UI offers and how it saves changes, and
+`docs/design.md` §21 for the specification.
+
+---|---|---|
+| `--host HOST` | `127.0.0.1` | Loopback address to bind. Accepted values are exactly `127.0.0.1`, `localhost` and `::1`. Any other value is a usage error (exit 2) and no socket is opened. There is no option to listen on other interfaces. |
+| `--port PORT` | `8765` | TCP port, integer from 1 to 65535. Otherwise a usage error (exit 2). |
+
+- The repository is discovered as for every command (`--repo`, or upward from
+  the current directory). No repository → exit 3.
+- On start it prints one line with the plain local URL, `http://127.0.0.1:8765/`
+  (IPv6: `http://[::1]:8765/`), then `Press Ctrl-C to stop.`. Open the URL in a
+  browser yourself; `serve` does not open one. The URL carries no token.
+  `serve` neither generates nor prints a token; the web application owns its
+  token (`docs/design.md` §21.4).
+- Ctrl-C stops the server gracefully and exits 0.
+- A bind failure (for example, the port is already in use) exits 3.
+- Only the repository's own files are read or written, through the core
+  operations. The server accepts requests only from the local machine. It checks
+  the `Host`, `Origin` and `Fetch-Site` headers on every API request, and the
+  application's token header on changes. These guards only stop web pages in
+  your browser. They do not protect against other local users or programs, which
+  can already read the repository directly (`docs/design.md` §21.4). Do not expose it through
+  a tunnel or proxy: remote deployment is not supported.
+- `serve` is a foreground process, not a daemon or service. The global
+  `--json`, `--no-input` and `-q` options have no effect on it; `--repo` applies.
+
+See `docs/webui.md` for what the web UI offers and how it saves changes, and
+`docs/design.md` §21 for the specification.
+
 ---
 
 ## Finding codes beyond the §14 catalogue
@@ -580,6 +648,8 @@ implementation additionally uses these refusal-only and command-level codes:
 | `E-BASELINE-UNCOMMITTED` / `E-BASELINE-INVALID` / `E-BASELINE-EXISTS` | `baseline create` refusals. |
 | `W-GRAPH-LARGE` | `graph` export above 300 nodes. |
 | `W-BASELINE-MISSING` | Baseline branch missing locally; status degrades to `unknown`. |
+| `E-BODY-STALE` | Catalogued by `docs/design.md` §21.8 (optional web UI extension), so it is not in the §14 table itself. Web UI save refused: the Markdown body changed on disk since the editor read it. Nothing is written; reload and re-apply the edit. No CLI command raises it. |
+| `E-PATH-UNSAFE` | Catalogued by `docs/design.md` §21.8. Web UI save refused (HTTP 400): a symbolic link or Windows junction is in the body or sidecar path or a folder above it, or the path would leave the repository. Nothing is written. No CLI command raises it. |
 
 These are tracked in `docs/backlog.md` as spec gaps (the §14 catalogue does
 not list them).

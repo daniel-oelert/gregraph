@@ -30,6 +30,7 @@ from gregraph.core.models import (
     Term,
 )
 from gregraph.core.storage import (
+    UnsafePathError,
     assets_dir,
     cache_entry_is_fresh,
     cache_path,
@@ -45,6 +46,7 @@ from gregraph.core.storage import (
     iter_documents,
     iter_terms,
     load_cache,
+    managed_path,
     read_body,
     read_sidecar,
     stat_cache_entry,
@@ -497,3 +499,103 @@ def test_cache_file_is_canonical_json(tmp_repo: Path) -> None:
     path = cache_path(tmp_repo)
     assert path.read_bytes() == canonical_json_bytes(cache)
     assert b'"schema"' in path.read_bytes()
+
+
+# --------------------------------------------------------------------------
+# managed_path: repository-relative paths made absolute safely (spec §3, §5.7)
+# --------------------------------------------------------------------------
+
+
+def _symlink(link: Path, target: Path, *, is_dir: bool = False) -> None:
+    """Create a symbolic link or skip when the platform forbids it (no privilege)."""
+    try:
+        link.symlink_to(target, target_is_directory=is_dir)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symbolic links unavailable on this platform: {exc}")
+
+
+def test_managed_path_returns_absolute_inside_root(tmp_repo: Path) -> None:
+    (tmp_repo / "documents" / "user-story").mkdir(parents=True)
+    body = tmp_repo / "documents" / "user-story" / "RE-7F3K2Q.md"
+    body.write_text("# A\n", encoding="utf-8")
+    rel = Path("documents/user-story/RE-7F3K2Q.md")
+
+    resolved = managed_path(tmp_repo, rel)
+
+    assert resolved.is_absolute()
+    assert resolved == tmp_repo / rel
+
+
+def test_managed_path_allows_missing_final_file(tmp_repo: Path) -> None:
+    rel = Path("documents/user-story/RE-7F3K2Q.json")
+    assert managed_path(tmp_repo, rel) == tmp_repo / rel
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [Path("/etc/passwd"), Path("documents/../../outside.md"), Path("..")],
+)
+def test_managed_path_rejects_escape(tmp_repo: Path, rel: Path) -> None:
+    with pytest.raises(UnsafePathError):
+        managed_path(tmp_repo, rel)
+
+
+def test_managed_path_rejects_empty_relative(tmp_repo: Path) -> None:
+    with pytest.raises(UnsafePathError):
+        managed_path(tmp_repo, Path(""))
+
+
+def test_managed_path_rejects_symlink_file_inside_root(tmp_repo: Path) -> None:
+    folder = tmp_repo / "documents" / "user-story"
+    folder.mkdir(parents=True)
+    (folder / "real.md").write_text("# A\n", encoding="utf-8")
+    _symlink(folder / "RE-7F3K2Q.md", folder / "real.md")
+
+    with pytest.raises(UnsafePathError):
+        managed_path(tmp_repo, Path("documents/user-story/RE-7F3K2Q.md"))
+
+
+def test_managed_path_rejects_symlink_file_outside_root(
+    tmp_repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "secret.md"
+    outside.write_text("# Outside\n", encoding="utf-8")
+    folder = tmp_repo / "documents" / "user-story"
+    folder.mkdir(parents=True)
+    _symlink(folder / "RE-7F3K2Q.md", outside)
+
+    with pytest.raises(UnsafePathError):
+        managed_path(tmp_repo, Path("documents/user-story/RE-7F3K2Q.md"))
+
+
+def test_managed_path_rejects_symlink_directory_component(
+    tmp_repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """A link directory below the root is refused even when it points inside."""
+    (tmp_repo / "documents" / "real").mkdir(parents=True)
+    (tmp_repo / "documents" / "real" / "RE-7F3K2Q.md").write_text(
+        "# A\n", encoding="utf-8"
+    )
+    _symlink(
+        tmp_repo / "documents" / "alias", tmp_repo / "documents" / "real", is_dir=True
+    )
+    outside = tmp_path_factory.mktemp("outside-dir")
+    _symlink(tmp_repo / "documents" / "escape", outside, is_dir=True)
+
+    with pytest.raises(UnsafePathError):
+        managed_path(tmp_repo, Path("documents/alias/RE-7F3K2Q.md"))
+    with pytest.raises(UnsafePathError):
+        managed_path(tmp_repo, Path("documents/escape/RE-7F3K2Q.md"))
+
+
+def test_managed_path_accepts_symlinked_root(
+    tmp_repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """The root itself may be reached through a link; only components below it count."""
+    (tmp_repo / "documents" / "user-story").mkdir(parents=True)
+    rel = Path("documents/user-story/RE-7F3K2Q.md")
+    (tmp_repo / rel).write_text("# A\n", encoding="utf-8")
+    alias_root = tmp_path_factory.mktemp("alias") / "repo-link"
+    _symlink(alias_root, tmp_repo, is_dir=True)
+
+    assert managed_path(alias_root, rel) == alias_root / rel

@@ -30,6 +30,7 @@ from typing import NoReturn
 from pydantic import ValidationError
 
 from gregraph import __version__
+from gregraph.cli import webui
 from gregraph.cli.output import Output
 from gregraph.core.config import read_config
 from gregraph.core.git import GitAdapter, NoteSuppressor, NullGitAdapter
@@ -71,6 +72,7 @@ _COMMAND_MODULES: dict[str, str] = {
     "baseline": "gregraph.cli.commands.baseline",
     "hooks": "gregraph.cli.commands.hooks",
     "hook": "gregraph.cli.commands.hook",
+    "serve": "gregraph.cli.commands.serve",
 }
 
 
@@ -199,6 +201,52 @@ def _add_command(
             if pseudo.dest == name:
                 subparsers._choices_actions.remove(pseudo)
     return command
+
+
+def _loopback_host(text: str) -> str:
+    """``--host`` values: loopback only, no remote serving (spec §21.3)."""
+    if text not in webui.LOOPBACK_HOSTS:
+        allowed = ", ".join(webui.LOOPBACK_HOSTS)
+        raise argparse.ArgumentTypeError(
+            f"host must be one of {allowed} (remote serving is not supported)"
+        )
+    return text
+
+
+def _port_number(text: str) -> int:
+    """``--port`` values: integers 1..65535 (spec §21.3)."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "port must be an integer from 1 to 65535"
+        ) from None
+    if not 1 <= value <= 65535:
+        raise argparse.ArgumentTypeError("port must be an integer from 1 to 65535")
+    return value
+
+
+def _add_serve(
+    subparsers: argparse._SubParsersAction[_Parser], parents: list[_Parser]
+) -> None:
+    """``serve`` exists only when gregraph-webui is installed (spec §21.2–21.3)."""
+    serve = _add_command(
+        subparsers, parents, "serve", "serve the optional local web UI"
+    )
+    serve.add_argument(
+        "--host",
+        type=_loopback_host,
+        default=webui.DEFAULT_HOST,
+        metavar="HOST",
+        help="loopback address: 127.0.0.1, localhost or ::1 (default: 127.0.0.1)",
+    )
+    serve.add_argument(
+        "--port",
+        type=_port_number,
+        default=webui.DEFAULT_PORT,
+        metavar="PORT",
+        help="TCP port, 1-65535 (default: 8765)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -685,6 +733,9 @@ def build_parser() -> argparse.ArgumentParser:
         "pre-commit", parents=parents, help="pre-commit hook body (internal)"
     )
 
+    if webui.find_serve_entry_point() is not None:
+        _add_serve(subparsers, parents)
+
     return parser
 
 
@@ -756,6 +807,15 @@ def _dispatch(args: argparse.Namespace, app: App) -> int:
     return int(run(args, app))
 
 
+def _serve_install_hint(argv: list[str], out: Output) -> None:
+    """Point at the optional distribution when ``serve`` was asked for but absent."""
+    index = _command_index(argv)
+    if index is None or argv[index] != "serve":
+        return
+    if webui.find_serve_entry_point() is None:
+        out.note("serve needs the optional web UI: pip install gregraph-webui")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``gregraph`` console script and ``python -m gregraph``.
 
@@ -771,6 +831,7 @@ def main(argv: list[str] | None = None) -> int:
         if exc.usage:
             print(exc.usage, end="", file=out.stderr)
         out.error(str(exc))
+        _serve_install_hint(raw, out)
         return EXIT_USAGE
 
     out.json_mode = bool(getattr(args, "json", False))

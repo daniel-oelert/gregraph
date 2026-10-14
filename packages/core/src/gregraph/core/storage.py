@@ -10,6 +10,9 @@ per §16.5, silently rebuilt on absence or corruption.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,6 +82,51 @@ def term_paths(root: Path, slug: str) -> tuple[Path, Path]:
 def assets_dir(root: Path, doc_id: str) -> Path:
     """Absolute path of a document's asset folder ``assets/<ID>/`` (spec §5.7)."""
     return root / ASSETS_DIR / doc_id
+
+
+class UnsafePathError(ValueError):
+    """A repository-relative path would leave the repository or cross a link (spec §3).
+
+    Raised by :func:`managed_path` before any read or write. Operations map it to
+    the ``E-PATH-UNSAFE`` refusal (spec §14). ``relative`` is the offending path.
+    """
+
+    def __init__(self, relative: Path, reason: str) -> None:
+        self.relative = relative
+        self.reason = reason
+        super().__init__(f"{relative.as_posix()}: {reason}")
+
+
+def _is_link(path: Path) -> bool:
+    """Whether ``path`` is a symbolic link or, on Windows, a junction."""
+    return path.is_symlink() or path.is_junction()
+
+
+def managed_path(root: Path, relative: Path) -> Path:
+    """Absolute path of a repository-relative file, refusing any link (spec §3).
+
+    The only place where a repository-relative model path becomes absolute for a
+    write. ``relative`` must be a non-empty relative path without ``..`` parts. Every
+    component below ``root`` must be a real file or directory: a symbolic link or
+    junction is refused even when it points inside the repository. ``root`` itself
+    is not checked, so a repository reached through a link still works. A missing
+    final component is allowed (the caller may be about to create it).
+
+    Raises :class:`UnsafePathError`; never touches the file system beyond
+    ``lstat``-style probes of each component.
+    """
+    parts = relative.parts
+    if not parts or relative.anchor or ".." in parts:
+        raise UnsafePathError(relative, "not a relative path inside the repository")
+    current = root
+    for part in parts:
+        current = current / part
+        if _is_link(current):
+            where = current.relative_to(root).as_posix()
+            raise UnsafePathError(relative, f"{where} is a symbolic link or junction")
+    if not current.resolve().is_relative_to(root.resolve()):
+        raise UnsafePathError(relative, "resolves outside the repository")
+    return current
 
 
 def _iter_managed(directory: Path, *, recursive: bool) -> Iterator[ManagedFiles]:
@@ -213,6 +261,35 @@ def write_body(path: Path, text: str) -> None:
     normalised = text.replace("\r\n", "\n").replace("\r", "\n")
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write(normalised)
+
+
+def write_body_atomic(path: Path, text: str) -> None:
+    """Replace an existing Markdown body without ever truncating it (design §21.5).
+
+    Used only by the browser body save (``update_body``). The new bytes go to a
+    temporary file in the same directory, named ``<name>.<hex>.tmp`` so that no
+    managed scan (``.md``/``.json``) can see it. The file is flushed to disk, its
+    permission bits are copied from the original, and it then replaces the target
+    with ``os.replace``. If any step fails, the temporary file is removed and the
+    original keeps its previous bytes. Line endings become LF (spec §5.2); nothing
+    else is normalised.
+
+    A missing ``path`` is an error and is never created here.
+    """
+    if not path.is_file():
+        raise FileNotFoundError(f"refusing to create missing body {path.name}")
+    data = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+    temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        shutil.copymode(path, temporary)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 class CacheFileEntry(BaseModel):

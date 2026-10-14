@@ -141,6 +141,14 @@ class Output:
             return
         print(text, file=self.stdout)
 
+    def announce(self, text: str) -> None:
+        """Essential stdout line: never suppressed, flushed before returning.
+
+        For lifecycle output a user must see whatever the flags, such as the
+        ``serve`` URL banner (spec §21.3). Use ``line`` for ordinary output.
+        """
+        print(text, file=self.stdout, flush=True)
+
     def detail(self, text: str) -> None:
         """Extra output only with ``--verbose``."""
         if self.quiet or self.json_mode or not self.verbose:

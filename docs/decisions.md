@@ -229,3 +229,73 @@ as intended. Published `pipx install gregraph-cli` is intended usage and was not
 verified against an index. (5) Dev tooling: the root `dev` group carries
 `hatchling`, the existing build backend, so local `--no-build-isolation` wheel builds
 work; it is a development dependency only, not a new runtime dependency.
+
+### D-WEBUI
+
+Optional local web UI, specified by spec §21 (Amendment A1, revision 0.3,
+authorised 2026-10-14). It is an extension to the v0.1 scope, not a milestone,
+and carries no tag. (1) **Third distribution.** `gregraph-webui` lives in
+`packages/webui` and is versioned in lockstep (0.1.1). It is separate so that
+the two baseline distributions keep their runtime dependency set closed
+(D11, BOOT-201): `pydantic`, `jinja2`, `markdown-it-py` and `mdit-py-plugins` for
+core, nothing new for the CLI. Only `gregraph-webui` adds `fastapi` and
+`uvicorn`. Users who never run `serve` never install them. (2) **Discovery by
+entry point.** The CLI learns whether `serve` exists from the `gregraph.serve`
+entry-point names, read with `importlib.metadata`, and imports the launcher
+only after `serve` is selected. `--host` and `--port` are validated by the
+argument parser, so `--help` and bad arguments never load the web UI. (3)
+**Compiled bundle checked in.** The React, TypeScript and Tailwind (Vite) build
+output is committed under `packages/webui/src/gregraph/webui/static/`, so pip
+installs need no Node.js. CI enforces the bundle: a frontend job on Node 22 and
+24 runs tests and typecheck, and on Node 22 it builds and fails on any drift of
+the static directory (`docs/webui.md`). Node.js 22.12 or later (Node 22 LTS or Node 24 recommended) is needed only for
+frontend development. (4) **Loopback-only, foreground.** `serve` accepts only
+`127.0.0.1`, `localhost` and `::1`, defaults to port 8765, prints a plain
+banner with the local URL (the user opens it; no browser launch), and stops on
+Ctrl-C with exit 0. It is not a daemon, so the spec's "no daemon" stance (§1.2)
+still holds in spirit. (4a) **Guards.** Every HTTP request, including the static
+page and assets, passes three checks before routing. Host: exactly one header,
+naming exactly `127.0.0.1`, `localhost` (case-insensitive) or `::1`. A header without a port means the HTTP default, 80.
+When `serve` starts the app, the header's effective port (explicit, or 80 when
+absent) must equal the bound port, so a server on port 80 accepts the bare names
+browsers send and a server on 8765 accepts only `:8765`. An app created without
+a port (tests, programmatic use) accepts any valid port. Origin: if present, exactly `http://` plus the request's
+own `Host` value. Fetch-Site: if present, `same-origin` or `none`. A refusal is
+403 `E-REQUEST-REFUSED`. (4b) **Token.** `create_app` owns a per-instance token,
+held in memory and never logged, printed or put in a URL. `serve` neither
+generates nor imports it. `GET /api/session` needs no token and returns the
+token as `csrf_token`. Mutating requests need exactly one matching
+`X-GREGraph-Token`, checked in constant time, else 403 `E-TOKEN-INVALID`. The
+guards and token defend against browser pages from other origins (cross-site
+request forgery, DNS rebinding). They do not defend against local OS users or
+processes running as the same user, which can already access the repository
+directly. This is a browser-origin guard, not authentication; the user asked for
+no auth scheme beyond it. (5) **Body writes.** `update_body` is a core
+operation, not a webui-only path, so the CLI and the web UI share one write
+rule. It requires the normalised hash of the file on disk (`base_hash`) and
+refuses with `E-BODY-STALE` on mismatch. It refuses `E-BODY-MISSING` without
+recreating the file. Structural problems (missing level-1 heading, front
+matter) are reported as findings, and the text is still saved. Text is stored as
+sent, changing only CRLF/CR to LF. The body is replaced through a same-directory
+`<filename>.<hex>.tmp` file, flushed and synced, with mode bits copied and then
+`os.replace`; ACLs and extended attributes are not preserved. The sidecar title
+update is a separate, non-atomic write. `update_body` does not bump `version` or
+`body_hash`, so the hook and `sync --bump` keep their meaning. `E-PATH-UNSAFE`
+is raised before any read or write when a path component below the root is a
+symbolic link or junction, or when a path would leave the root. (6)
+**Concurrency is honest about its limit.** Requests are serialised in-process.
+External writers are not locked (§1.2 "no locking" is kept outside the process).
+The stale check and the writes are not one atomic compare-and-swap against
+other processes, so external races, including between the body and sidecar
+writes, remain possible. `base_hash` is a best-effort guard only. This is an accepted residual risk, not
+a resolved one. (7) **Scope
+of the first version.** Filters are `type`, `status` and `q` (title or ID text).
+Links are chosen by the user and validated by core on submission; no
+allowed-targets API exists. The graph returns the first 300 nodes in ascending
+ID order with a truncation flag, and has no root or type filter. Git commit UI,
+asset upload, CR and glossary editing, arbitrary file access and Markdown
+rendering are excluded. Remote or multi-user use is unsupported.
+(8) **Verification.** The required gate `mypy --strict -p gregraph` is kept as
+written. CI also runs `mypy --strict -p gregraph -p gregraph.cli -p gregraph.webui`,
+because the shared namespace is not reached through `-p gregraph` alone for the
+optional packages. Packaging is checked by `tests/packaging_check.py`.

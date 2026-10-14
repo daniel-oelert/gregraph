@@ -1,0 +1,24 @@
+# Optional web UI distribution (design §21.2). Lockstep version with core and cli.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gregraph-webui"
+version = "0.1.1"
+description = "Optional loopback web UI for GREGraph (gregraph serve)"
+requires-python = ">=3.12"
+dependencies = [
+    "gregraph-core==0.1.1",
+    "gregraph-cli==0.1.1",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+]
+
+[project.entry-points."gregraph.serve"]
+webui = "gregraph.webui.launch:launch"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gregraph"]
+# The compiled bundle is checked in; ship it even if a VCS ignore rule matches.
+artifacts = ["src/gregraph/webui/static/**"]

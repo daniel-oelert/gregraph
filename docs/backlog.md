@@ -9,7 +9,8 @@ agents had to decide; settled questions point at their answer in
 
 Mirrored from the closing note of `docs/design.md` §20:
 
-- Web UI (read/edit/commit).
+- Web UI commit workflows (Git commit, branch and push from the browser).
+  The optional local read/edit UI is specified in `docs/design.md` §21.
 - History/diff between refs and baselines.
 - Merge driver for sidecars.
 - Exports (other than the Mermaid graph).
@@ -583,3 +584,17 @@ lands at version 2 in its first hook commit (the stored v1 hash is the
 template skeleton's; §7.2's hash-based bump at the first commit is
 correct). The v1 skeleton is never committed. A body input on `new` (flag or
 stdin) would let version 1 be the real content; v0.2 idea.
+
+## Accepted residual risks (optional web UI, design §21.5)
+
+These are known constraints that are accepted for the first version. They are not
+open defects and have no planned fix.
+
+- Writes from outside the `serve` process (another terminal, an editor, Git) are
+  not locked. The stale check (`E-BODY-STALE`) is a best-effort guard, not an atomic
+  compare-and-swap, so an external race between the check and the write remains
+  possible.
+- The body file and its sidecar title are written by two separate steps. A crash
+  between them can leave the title out of date until the next sync or save. The
+  sidecar write itself is not atomic, so a crash during it can leave a truncated
+  sidecar (`E-SIDECAR-INVALID`).

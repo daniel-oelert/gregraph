@@ -250,3 +250,35 @@ def test_output_defaults_to_current_sys_streams() -> None:
     handle = Output()
     assert hasattr(handle.stdout, "write")
     assert hasattr(handle.stderr, "write")
+
+
+class _FlushSpy(io.StringIO):
+    """Records what had been flushed to the stream at each flush call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushed = ""
+
+    def flush(self) -> None:
+        super().flush()
+        self.flushed = self.getvalue()
+
+
+def test_announce_survives_quiet_and_json() -> None:
+    for kwargs in ({"quiet": True}, {"json_mode": True}):
+        handle, out, err = output_pair(**kwargs)
+        handle.announce("GREGraph UI: http://127.0.0.1:8765/")
+        assert out.getvalue() == "GREGraph UI: http://127.0.0.1:8765/\n"
+        assert err.getvalue() == ""
+
+
+def test_announce_is_flushed_before_returning() -> None:
+    spy = _FlushSpy()
+    Output(stdout=spy, stderr=io.StringIO()).announce("banner")
+    assert spy.flushed == "banner\n"
+
+
+def test_line_still_suppressed_when_quiet_after_announce() -> None:
+    handle, out, _ = output_pair(quiet=True)
+    handle.line("ordinary")
+    assert out.getvalue() == ""

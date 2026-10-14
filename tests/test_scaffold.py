@@ -25,7 +25,7 @@ def test_version_attribute() -> None:
 
 def test_version_consistent_across_packaging_and_config() -> None:
     root = Path(__file__).resolve().parents[1]
-    for dist in ("core", "cli"):
+    for dist in ("core", "cli", "webui"):
         path = root / "packages" / dist / "pyproject.toml"
         data = tomllib.loads(path.read_text(encoding="utf-8"))
         assert data["project"]["version"] == gregraph.__version__, dist

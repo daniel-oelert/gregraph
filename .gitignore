@@ -15,6 +15,11 @@ build/
 .coverage.*
 htmlcov/
 
+# Web UI frontend (packages/webui/frontend)
+node_modules/
+.vite/
+*.tsbuildinfo
+
 # Virtual environments
 .venv/
 venv/

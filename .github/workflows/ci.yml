@@ -22,15 +22,53 @@ jobs:
       - name: Upgrade pip (>=25.1 for --group)
         run: python -m pip install --upgrade "pip>=25.1"
       - name: Install
-        run: python -m pip install --group dev -e packages/core -e packages/cli
+        run: python -m pip install --group dev -e packages/core -e packages/cli -e packages/webui
       - name: Ruff check
         run: ruff check .
       - name: Ruff format
         run: ruff format --check .
       - name: Mypy
-        run: mypy --strict -p gregraph
+        run: mypy --strict -p gregraph -p gregraph.cli -p gregraph.webui
       - name: Pytest
         run: pytest
+
+  frontend:
+    name: frontend / node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22", "24"]
+    defaults:
+      run:
+        working-directory: packages/webui/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: packages/webui/frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Unit tests
+        run: npm run test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build bundle
+        if: matrix.node-version == '22'
+        run: npm run build
+      - name: Bundle drift check (checked-in static bundle must match the build)
+        if: matrix.node-version == '22'
+        working-directory: .
+        run: |
+          git diff --exit-code -- packages/webui/src/gregraph/webui/static
+          untracked="$(git ls-files --others --exclude-standard -- packages/webui/src/gregraph/webui/static)"
+          if [ -n "$untracked" ]; then
+            echo "untracked bundle files:"
+            echo "$untracked"
+            exit 1
+          fi
 
   packaging:
     name: packaging / ${{ matrix.os }} / py${{ matrix.python-version }}

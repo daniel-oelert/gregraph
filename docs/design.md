@@ -1,4 +1,4 @@
-# GREGraph — Design Document, revision 0.2
+# GREGraph — Design Document, revision 0.3
 
 **GREGraph** — Git-aware Requirements Engineering Graph. CLI command: `gregraph`.
 
@@ -11,6 +11,7 @@ Document status: design baseline for the first implementation. Date: 2026-09-10.
 | Revision | Date | Changes |
 |---|---|---|
 | r0.1 | 2026-09-10 | Initial design. |
+| r0.3 | 2026-10-14 | Amendment A1 (section 21): optional local web UI as a third, optional distribution (`gregraph-webui`) with a foreground loopback-only `serve` command, a body-write operation with `E-BODY-STALE`, and narrow amendments to sections 1.2, 1.4, 7, 13, 14, 16 and BOOT-205. Baseline sections are otherwise unchanged. |
 | r0.2 | 2026-09-10 | Change requests redesigned (section 9): removed from the graph (kind `change` and edge type `affects` deleted); scope entries with fixed base versions; drift detection against the baseline branch; origin tracking for documents introduced by a CR; proposed vs. effective status derived from the baseline branch; `implemented` replaces `done`; both CR workflows documented; CRs optional. Dependent changes in sections 1.3, 2, 5.2–5.4, 6.1–6.3, 7.5–7.6, 8, 11, 12.1, 13, 14, 15, 16, 18, 19, 20 and appendices A–C. |
 
 ## 0. How to read this document
@@ -20,6 +21,8 @@ This document is the complete specification for GREGraph v0.1. It is written for
 Where the requirements engineer left a question open and asked for an evaluation, this document evaluates the options and **takes a decision**. Every such decision is marked `[DECISION]` and collected in section 20 so it can be revisited before or during implementation. The agent implements the decisions as written unless told otherwise.
 
 Normative words: **must** (required), **should** (default, deviations need a documented reason), **may** (optional).
+
+Section 21 (Amendment A1, revision 0.3) adds an optional local web UI. It is authoritative for the optional extension and lists every earlier statement it supersedes. It does not change the v0.1 baseline otherwise; sections 0–20 and Appendices A–C remain the historical record.
 
 ---
 
@@ -36,7 +39,7 @@ GREGraph is a local, Git-synchronised, Markdown-based requirements management to
 1. **Humans edit Markdown; the tool edits everything else.** Users never create, rename, or delete document files, never edit sidecar JSON, never write links by hand.
 2. **The graph is the truth; folders are a convenience.** Directory placement carries no meaning.
 3. **Git is the synchronisation and collaboration layer.** The tool never talks to a server. Review happens through the team's own Git workflow; the tool imposes no branching strategy.
-4. **Local, single-process, on-demand.** No daemon, no watch mode, no locking.
+4. **Local, single-process, on-demand.** No daemon, no watch mode, no locking. (Amended by section 21: the optional `gregraph serve` is a foreground, loopback-only process; see 21.3.)
 5. **Core library first, CLI second.** Every operation is available as a Python API so a future local web UI can reuse it without reimplementation.
 6. **Degrade gracefully.** Without Git, everything still works except features that need history (draft/active status derived from the baseline branch).
 
@@ -61,7 +64,7 @@ GREGraph is a local, Git-synchronised, Markdown-based requirements management to
 
 ### 1.4 Out of scope for v0.1 (design must not preclude)
 
-- Web UI (planned for v0.2; the core API is designed for it).
+- Web UI beyond the optional local read/edit subset of section 21 (planned for v0.2 for commit workflows and the remaining capabilities; see 21.1 for the exact split).
 - Requirement-level history and diff between Git refs.
 - Custom Git merge driver for JSON sidecars.
 - Import/export (ReqIF, CSV, Jira, Confluence).
@@ -1140,6 +1143,151 @@ Known open items for v0.2: web UI (read/edit/commit), history/diff between refs 
 
 ---
 
+## 21. Amendment A1 — Optional local web UI (r0.3)
+
+**Status.** Accepted extension, authorised by the project owner on 2026-10-14. It is not a new milestone and carries no milestone tag. It is the authority for the optional `gregraph-webui` distribution and supersedes only the statements listed in 21.10. Its rationale is recorded as D-WEBUI in `docs/decisions.md`. Everything not mentioned here keeps its v0.1 meaning.
+
+### 21.1 Scope
+
+**In scope (optional extension):** a browser UI served by a foreground, loopback-only process (`gregraph serve`) that uses the core API to:
+
+- browse documents and filter them by type, status and text (title or ID);
+- create a document from a type and title (same defaults as `new`);
+- view a document's fields, status, and edges with freshness;
+- view the raw Markdown body and edit it;
+- set tags (`set tags` semantics of 13.6);
+- add and remove links (`link`/`unlink`), with every rule of section 6 enforced by core;
+- show derived status, WIP, and validation findings, with clickable subjects;
+- show a clickable graph view of the first 300 nodes, with a truncation notice.
+
+**Out of scope (still deferred):** Git commit, branch or push from the UI; asset upload or any access to arbitrary files; editing change requests, glossary terms, sidecar JSON or configuration; rendering Markdown as HTML; remote or multi-user deployment; authentication beyond the per-application token of 21.4; a daemon or service installation.
+
+### 21.2 Distributions and installation
+
+- A third distribution, `gregraph-webui`, is built from `packages/webui` (hatchling, `src/` layout, `requires-python >=3.12`), version **0.1.1**, released in lockstep with `gregraph-core` and `gregraph-cli`.
+- Its runtime dependencies are `gregraph-core==<same version>`, `gregraph-cli==<same version>`, `fastapi` and `uvicorn` (minimum versions pinned in `packages/webui/pyproject.toml`). It is the only distribution that depends on FastAPI or uvicorn.
+- `gregraph-core` and `gregraph-cli` keep their runtime dependencies unchanged (16.3, BOOT-201). Without `gregraph-webui`, nothing about them changes.
+- It contributes files only under `gregraph/webui/` (the shared `gregraph` namespace of 16.4 applies). The compiled frontend is shipped inside the wheel under `gregraph/webui/static/`. Installing it needs no Node.js.
+- Installation:
+  - from a checkout: `python -m pip install ./packages/core ./packages/cli ./packages/webui`;
+  - published (intended usage, not yet on an index): `pip install gregraph-webui`, which pulls in `gregraph-core` and `gregraph-cli` and therefore also provides the `gregraph` command.
+- The integration is discovered through the entry-point group `gregraph.serve`, name `webui`. The CLI reads entry-point *names* with `importlib.metadata` to decide whether `serve` exists. It imports the webui module only after `serve` has been selected, so `--help` and every other command never import FastAPI, uvicorn or any `gregraph.webui` module.
+
+### 21.3 The `serve` command
+
+```
+gregraph [global options] serve [--host HOST] [--port PORT]
+```
+
+- `serve` is a **lifecycle command**. It starts the local integration and performs no repository operation itself. Its HTTP handlers call the functions of `operations.py`, one per user action (21.6).
+- `--host` defaults to `127.0.0.1`. The accepted values are exactly `127.0.0.1`, `localhost` and `::1`. Any other value is a usage error (exit 2) and no socket is opened. There is no option to bind to all interfaces.
+- `--port` defaults to `8765` and must be an integer from 1 to 65535; otherwise a usage error (exit 2). Both options are validated by the argument parser, before the web UI is loaded.
+- Repository discovery follows the global rules (`--repo`, upward search). No repository → exit 3.
+- A bind failure, for example a port already in use, is an environment error (exit 3). The CLI probes the address before starting the server.
+- On start, `serve` prints the banner `GREGraph UI: http://127.0.0.1:8765/` (IPv6 as `http://[::1]:8765/`) followed by `Press Ctrl-C to stop.`. The URL carries no token. `serve` does **not** open a browser; the user opens the URL manually. `serve` does not generate, print or import any token; the application owns its token (21.4).
+- The process runs in the foreground until interrupted. Ctrl-C shuts down gracefully and exits 0. There is no daemonisation, no watch mode, and no background service.
+- When the distribution is absent, `serve` is not a registered command: invoking it is a usage error (exit 2), a hint names `gregraph-webui`, and `--help` does not list it.
+- Global options apply as before; `--repo` is the only global option that changes `serve` behaviour. `--json` and `--no-input` are accepted and ignored.
+
+### 21.4 Local-service security model
+
+- **Loopback only.** The server binds to the requested loopback address (21.3), makes no outbound network calls, and is not a remote service.
+- **Guards on every HTTP request.** The static page, the static assets and every `/api/` route pass the same three checks before routing. A refusal is HTTP 403 with the code `E-REQUEST-REFUSED`.
+  - **Host.** Exactly one `Host` header. Its host part must be exactly `127.0.0.1`, `localhost` (case-insensitive) or `::1` in brackets; other loopback addresses such as `127.0.0.2` are refused. A header without a port means the HTTP default, port 80. When the application is created with a bound port, as `serve` does, the header's effective port (its explicit port, or 80 when there is none) must equal the bound port. A server bound to port 80 therefore accepts the bare `127.0.0.1` and `localhost` that browsers send, and a server bound to any other port, such as the default 8765, accepts only a header that names that port. When the application is created without a port (programmatic use, tests), any valid port from 1 to 65535 is accepted. This is DNS-rebinding protection.
+  - **Origin.** If an `Origin` header is present it must be exactly one value, and it must equal `http://` followed by the request's own `Host` header value (the origin of the request itself). Comparison is case-insensitive. Anything else is refused as a cross-origin request.
+  - **Fetch-Site.** If `Sec-Fetch-Site` is present it must be exactly one value, either `same-origin` or `none`. An absent header is allowed.
+- **Application token (mutations only).** `create_app` (in `packages/webui`) generates a random token (`secrets.token_urlsafe(32)`) per application instance. It is held in memory only and is never persisted, logged, printed or placed in a URL. The `serve` command neither generates nor imports a token. `GET /api/session` needs no token and returns the token as `csrf_token`. A mutating request (`POST`, `PUT`, `PATCH`, `DELETE`) must carry exactly one `X-GREGraph-Token` header whose value matches (constant-time comparison); otherwise it is refused with HTTP 403 and `E-TOKEN-INVALID`. The token check runs after the three guards above.
+- **Mutation framing.** A mutating request must have media type `application/json` (else 415, `E-CONTENT-TYPE`), must not carry a `Content-Encoding` header (else 415, `E-CONTENT-ENCODING`), and its body must not exceed 1 MiB (else 413, `E-BODY-TOO-LARGE`).
+- **What the token defends against.** The token and the Origin and Fetch-Site guards defend against web pages that a browser loads from other origins, including cross-site request forgery and DNS rebinding. They do **not** defend against local operating-system users or processes that run as the same user, that can connect to loopback, or that can read process memory. Such processes can already read and change the repository directly. The token is therefore a browser-origin guard, not authentication, and it is not a control against other local users or programs.
+- **Response headers.** Every response carries a Content-Security-Policy that allows only same-origin scripts and styles, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Frame-Options: DENY`. `/api/` responses also carry `Cache-Control: no-store`.
+- **Output.** Markdown is returned and displayed as text. The server never renders Markdown to HTML.
+
+### 21.5 Body writes: `update_body`
+
+Section 7 gains one rule for editing prose. Content changes made through the UI follow the same versioning as any other edit (7.2): saving does not bump the version; the pre-commit hook or `sync --bump` does.
+
+Core operation, one function in `operations.py` with keyword arguments and a result dataclass:
+
+`update_body(workspace, *, doc_id, text, base_hash) -> BodyUpdateResult`
+
+1. `base_hash` is the normalised body hash (7.3) of the Markdown file **as it currently is on disk**, as the editor read it. It is not the sidecar's `body_hash`, which lags behind unbumped edits. The web API returns this value in `body_hash` of the document detail, next to `body_text`.
+2. **Refusals (nothing is written):**
+   - unknown, malformed, change-request and glossary IDs → `E-ID-UNKNOWN`;
+   - `E-PATH-UNSAFE` (step 6), checked before anything is read or written;
+   - `E-BODY-MISSING` (14, existing code) when the Markdown file does not exist. The file is **not** recreated;
+   - `E-BODY-STALE` (21.8) when the normalised hash of the file on disk differs from `base_hash`.
+3. **Structural problems are reported, not refused.** If the first non-blank line is not a level-1 heading, the text is saved and the result carries `E-TITLE-MISSING`; if the text starts with `---`, the text is saved and the result carries `E-FRONTMATTER-FORBIDDEN`. These findings are the same as `validate` reports. When the text has no level-1 heading, the sidecar title keeps its previous value.
+4. **Text is stored as sent**, except that CRLF and bare CR line endings are converted to LF. Nothing else is altered: hard line breaks, blank lines, trailing whitespace and the presence or absence of a final newline are preserved. The normalisation of 7.3 is used only to compute hashes; it is never written back to the file. The file is read as UTF-8 with any byte-order mark removed, and its line endings are read as LF; the body file is rewritten only when the new LF text differs from that LF text. The sidecar title may change independently (step 5). The result's `changed` flag is true whenever the body file or the sidecar title changed, so an unchanged body with a title that differs from its heading still reports a change.
+5. **Title sync.** When the text has a level-1 heading, the sidecar `title` is synchronised to it (5.6). No other sidecar field changes: `version`, `body_hash`, `assets`, `links`, `tags`, `deprecated` and `origin_cr` are untouched. A saved change is therefore visible as "modified, unbumped" in `status` until the hook or `sync --bump` runs. Git workflows are unchanged.
+6. **Path safety.** Both the Markdown file and its sidecar are resolved with `managed_path` before any read or write. Each path component below the repository root, including the file and every folder above it, must be a real file or directory: a symbolic link, or on Windows a junction, is refused, and so is a relative path that would leave the repository. The refusal is `E-PATH-UNSAFE` (21.8), with the offending repository-relative path as subject. Nothing is written in that case.
+7. **Write order and atomicity.**
+   - The **body** is written by the storage helper `write_body_atomic`. It creates a temporary file `<filename>.<32 hex digits>.tmp` in the same directory (for example `RE-7F3K2Q.md.<hex>.tmp`), opened exclusively, so that no managed scan of `.md` or `.json` files sees it. It writes the LF-only UTF-8 bytes, flushes and syncs them to disk, copies the target's permission bits onto it, and then replaces the Markdown file with `os.replace`. If any step fails, the temporary file is removed and the original file keeps its previous bytes. Access-control lists and extended attributes are **not** preserved; only the mode bits are.
+   - The **sidecar title** update, when needed, is a separate canonical rewrite. It is **not** atomic, and it is not atomic with the body write. A crash between the two writes can leave the title out of sync until the next sync or save corrects it (5.6). A crash during the sidecar write itself can leave a truncated sidecar, which `validate` reports as `E-SIDECAR-INVALID` and which must then be repaired by hand.
+8. The result carries the new normalised body hash, which the client uses as the `base_hash` of its next save; the `changed` flag; and the findings of step 3. `update_body` does not recompute asset references; reconcile (7.5) does.
+
+**Concurrency.** Operations issued by the web process are serialised by an in-process lock. Writes from outside the process (another terminal running the CLI, a Git operation, an editor) are not locked. The stale check of step 2 and the writes of step 7 are not one atomic compare-and-swap against external processes, and the body and sidecar writes are not atomic with each other. External races therefore remain possible. This is an accepted residual risk, not a resolved one. `base_hash` is a best-effort guard against them, not a guarantee. Local, single-process operation (1.2 principle 4) is the assumption.
+
+### 21.6 Web UI behaviour
+
+The first version offers the following, and nothing else. The interface has three tabs: **Documents**, **Graph** and **Validation**. A header shows the repository name and, when Git is unavailable, a "No Git" badge.
+
+- **Documents tab, status cards.** Above the list: a Git-aware or degraded badge, the count of findings, one count per derived status as core reports it, and three lists of clickable IDs: pending (unbumped changes), outdated links and stale links. Each entry is a backend link label of the form `SOURCE TYPE TARGET`. Clicking a well-formed entry opens its source document. A label that cannot be parsed is shown as plain text and is not clickable.
+- **Documents tab, list and filters.** Rows show ID, type, derived status, version and title, and open the document when clicked. Filters are a text search (`q`, case-insensitive, matched against the title or the ID), a type select, and a status select with `draft`, `active`, `superseded` and `deprecated`. There are no kind or tag filters.
+- **Create.** A dialog takes a type (the change-request type is not offered), a title and optional tags. The server creates the document the same way `gregraph new` does, with the type's default template, and a new document is an orphan until linked (6.3).
+- **Document detail.** Shows the sidecar fields, the derived status, and the tags. Tags are edited as a complete list and replace the stored list (`PATCH …/meta`). Outbound and inbound links are listed with their freshness.
+- **Raw Markdown.** The body is shown as plain text in an editor. Saving sends the text and the `base_hash` the editor read. A successful save reports that the change is pending until `gregraph sync` or the pre-commit hook records the new version. Structural findings of step 3 are shown after a save. On `E-BODY-STALE` (HTTP 409) the draft is kept, nothing is overwritten, and the user must reload the document before saving again.
+- **Links.** The user picks a link type from the session's link types and a target from a select that lists every other document; the select does not filter by kind, cycles or liveness. Submitting sends the link to core, which validates kind rules, cycles and liveness. Refusals (`E-CYCLE`, `E-EDGE-RULE`, `E-EDGE-EXCLUSIVE`, `E-TARGET-SUPERSEDED`, `E-TARGET-DEPRECATED` and others) are shown with their finding text. Each outbound link has its own remove action.
+- **Graph tab.** Draws the nodes and edges returned by the graph endpoint: the **first 300 nodes** in ascending ID order, with the edges between them. When the repository has more nodes, the view shows the notice "Graph truncated: showing N of M nodes (limit 300)". There is no root or type filter for the graph in this version. Clicking a node opens its document.
+- **Validation tab.** Shows the error and warning counts and the list of findings with code, severity, message and subject. When there are none, the tab says that the repository is valid.
+- Commit, asset, change-request and glossary editing are not part of this extension (21.1).
+
+### 21.7 Build, bundle and CI
+
+- Frontend source: `packages/webui/frontend` (React 19, TypeScript, Tailwind CSS 4, Vite 7, Vitest 4). Its `package-lock.json` is committed. `package.json` requires Node.js 22.12 or later (Node 22 LTS or Node 24 recommended).
+- The compiled output is **checked into the repository** at `packages/webui/src/gregraph/webui/static/` (`index.html` and `assets/`). The wheel ships it as package data. A pip install never needs Node.js.
+- `npm run build` runs the TypeScript check and then `vite build`, which writes into the checked-in static directory.
+- The CI workflow (`.github/workflows/ci.yml`) has a `frontend` job on `ubuntu-latest` with Node 22 and Node 24. On both it runs `npm ci`, `npm run test` and `npm run typecheck`. On Node 22 only, it also runs `npm run build` and the **bundle drift check**: `git diff --exit-code` on the static directory, and a failure if any untracked file appears there. A frontend source change therefore cannot be merged without its rebuilt bundle.
+- The Python job installs `packages/webui` in editable mode and runs the whole test suite, including the web tests.
+
+### 21.8 Error codes
+
+| Code | Sev | Rule | Web API status |
+|---|---|---|---|
+| `E-BODY-STALE` | E | `update_body` refused because the body on disk no longer matches `base_hash`. Refusal only (like `E-CR-DISABLED`). Nothing is written. | 409 |
+| `E-PATH-UNSAFE` | E | `update_body` refused because a path component below the repository root is a symbolic link or junction, or a path would leave the repository. Refusal only. Nothing is written. | 400 |
+| `E-BODY-MISSING` | E | Existing §14 code, used as a refusal by `update_body` when the Markdown file is missing. The file is not recreated. Nothing is written. | 409 |
+
+`E-BODY-STALE` and `E-PATH-UNSAFE` extend the catalogue of 14. Other refusals raised by core are mapped to 409, except `E-ID-UNKNOWN` (404). Each new code has tests in `tests/core/`: `E-BODY-STALE` for the refusal and an unchanged file; `E-PATH-UNSAFE` for a symlinked body, a symlinked sidecar, a symlinked folder and a path that would leave the root, each leaving every file untouched.
+
+### 21.9 Testing requirements
+
+- Verification gates. Before every commit, the required gate runs: `ruff check . && ruff format --check . && mypy --strict -p gregraph && pytest`. CI also runs the explicit form `mypy --strict -p gregraph -p gregraph.cli -p gregraph.webui`. The explicit form names the optional CLI and web UI packages, which `-p gregraph` alone does not reach through the shared namespace. It needs all three distributions installed. The required gate stays as written.
+- Packaging. `python tests/packaging_check.py` (run by the CI packaging job) builds the three wheels and checks them: no shared archive member; each wheel holds only its share of the `gregraph` namespace; the web UI wheel declares the `gregraph.serve` entry point and contains the static bundle, and every asset the page references resolves inside it. In clean virtual environments it checks: core alone imports `gregraph.core` and ships the 14 built-in templates, with no CLI; core and CLI report the release version, and `serve` is absent; all three expose `gregraph serve --help` without importing the web UI package or FastAPI, and an installed server answers `/` and every asset it references; with the web UI wheel installed without its dependencies, `gregraph --help` still runs and `gregraph serve` exits 3 naming `gregraph-webui`.
+- Every rule of 21.3–21.5 that can be checked without a browser has a test: argument validation (host and port), no-repository exit, the Host, Origin and Fetch-Site guards on the static page and on the API, token rejection on mutations, `GET /api/session` without a token, mutation framing (media type, encoding, size), `update_body` success, byte-exact storage (hard breaks, blank lines, final newline), structural findings reported on save, `E-BODY-STALE`, `E-BODY-MISSING` without file recreation, `E-PATH-UNSAFE`, the atomic body replacement with mode bits preserved, and `version`/`body_hash` unchanged after a save.
+- `--help` must not import any `gregraph.webui` module (a test checks `sys.modules`).
+- Frontend unit tests (Vitest) run in `npm run test`; the TypeScript check runs in `npm run typecheck`. The CI job of 21.7 runs both.
+- The coverage targets of section 17 apply to the core changes of this amendment. The webui package is held to the same ruff, mypy and pytest gate as the other distributions.
+
+### 21.10 Superseded and amended statements
+
+| Location | Earlier statement | Effect of this amendment |
+|---|---|---|
+| §1.2 principle 4 | No daemon, no watch mode, no locking | `serve` is an optional foreground loopback process. No daemon, no watch mode. Locking is in-process serialisation only; external races remain (21.5). |
+| §1.4, first bullet | Web UI out of scope, planned for v0.2 | The read/edit subset of 21.1 is in scope as an optional extension. Commit UI, asset upload, CR and glossary editing and Markdown rendering stay out of scope. |
+| §7 | Body edits | New body write rule `update_body` (21.5). Sections 7.2–7.5 are unchanged. |
+| §13 (general) | Every CLI command corresponds to one `operations.py` function | `serve` is exempt as a lifecycle command (21.3). Every other command keeps the rule. |
+| §13.24 (new) | — | `serve` command (21.3). |
+| §14 | Validation and refusal catalogue | Adds the refusal codes `E-BODY-STALE` and `E-PATH-UNSAFE` (21.8). |
+| §16.1 | Two-distribution layout | Adds `packages/webui` and `gregraph/webui/` (21.2). |
+| §16.2 | Boundaries and rules | The webui layer calls `operations.py` only; it does not read or write repository files itself (only the static bundle is read, from the package). |
+| §16.3 | Dependencies | Core and CLI unchanged. `gregraph-webui` alone adds `fastapi` and `uvicorn` (21.2). |
+| §16.4 | Two distributions, released in lockstep | Three distributions; the third is optional and lockstep-versioned (21.2). |
+| Appendix A, BOOT-205 | No network service | Read as "no outbound or remote service". The optional loopback listener of 21.3–21.4 is an explicit exception. |
+| §20 closing note | Open item "web UI (read/edit/commit)" | The read/edit part is done in the optional extension. Commit workflows and the items of 21.1 remain open (`docs/backlog.md`). |
+| Appendix C | Copy of `AGENTS.md` | Historical copy. The repository's `AGENTS.md` is authoritative for layout and dependencies. |
+
+---
+
 ## Appendix A — Initial requirements for GREGraph (agent-readable, not in tool format)
 
 Format per item: provisional key; type; kind; statement in EARS form; refines/constrains targets by provisional key. All are to be entered into the requirements repository during M6.
@@ -1207,7 +1355,7 @@ Format per item: provisional key; type; kind; statement in EARS form; refines/co
 | BOOT-202 | non-functional-requirement | The tool shall produce byte-identical sidecars for identical logical content (canonical serialisation). | constrains BOOT-002 |
 | BOOT-203 | non-functional-requirement | The core library shall expose every operation as a function without console I/O so that a web UI can reuse it. | constrains BOOT-001 |
 | BOOT-204 | non-functional-requirement | The tool shall run on Linux, macOS, and Windows with Python 3.12 or later. | constrains BOOT-004 |
-| BOOT-205 | constraint | The tool shall not communicate with any network service. | constrains BOOT-001 |
+| BOOT-205 | constraint | The tool shall not communicate with any network service. (Amended by section 21: the optional `gregraph serve` listens on loopback only and makes no outbound connections; see 21.3–21.4.) | constrains BOOT-001 |
 
 ### Verification (examples; the agent derives one test-case document per functional requirement)
 

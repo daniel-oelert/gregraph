@@ -55,7 +55,12 @@ from gregraph.core.hashing import (
     normalise_body,
 )
 from gregraph.core.ids import generate_id, is_valid_prefix, normalise_id
-from gregraph.core.markdown import extract_title, find_asset_refs, find_mentions
+from gregraph.core.markdown import (
+    extract_title,
+    find_asset_refs,
+    find_mentions,
+    has_front_matter,
+)
 from gregraph.core.mermaid import export_mermaid
 from gregraph.core.models import (
     AssetRef,
@@ -81,6 +86,7 @@ from gregraph.core.storage import (
     CacheFileEntry,
     CacheIndex,
     ManagedFiles,
+    UnsafePathError,
     assets_dir,
     canonical_json_bytes,
     config_path,
@@ -88,12 +94,14 @@ from gregraph.core.storage import (
     iter_changes,
     iter_documents,
     iter_terms,
+    managed_path,
     read_body,
     read_sidecar,
     stat_cache_entry,
     templates_dir,
     term_paths,
     write_body,
+    write_body_atomic,
     write_cache,
     write_sidecar,
 )
@@ -113,6 +121,7 @@ from gregraph.core.workspace import Workspace
 __all__ = [
     "BaselineCreateResult",
     "BaselineListResult",
+    "BodyUpdateResult",
     "CheckResult",
     "CreateResult",
     "DeprecateResult",
@@ -203,6 +212,7 @@ __all__ = [
     "term_usage",
     "undeprecate",
     "unlink",
+    "update_body",
     "validate",
 ]
 
@@ -359,6 +369,24 @@ class RefreshResult:
     findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
     dry_run: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class BodyUpdateResult:
+    """Result of :func:`update_body` (browser editing; spec §5.2, §5.6, §7.3).
+
+    ``body`` is repository-relative; ``body_hash`` is the hash of the normalised
+    body now on disk; ``title`` is the H1 read from it (``None`` when missing).
+    ``changed`` is ``True`` when the body or the sidecar title was written.
+    ``version`` and the other lifecycle fields are never changed here (§7.2).
+    """
+
+    id: str
+    body: Path
+    body_hash: str
+    title: str | None
+    changed: bool
+    findings: tuple[Finding, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1370,6 +1398,138 @@ def set_fields(
         extra=dict(document.extra),
         changed=changed,
         notices=tuple(notices),
+    )
+
+
+def _body_findings(doc_id: str, body: str) -> tuple[Finding, ...]:
+    """H1 and front-matter findings of a normalised body (spec §5.2, §5.6, §14).
+
+    Same codes and messages as :func:`gregraph.core.validation.check_document_bodies`.
+    """
+    findings: list[Finding] = []
+    if extract_title(body) is None:
+        findings.append(
+            Finding(
+                code="E-TITLE-MISSING",
+                severity="E",
+                subject=doc_id,
+                message="no H1 title as the first non-blank line",
+                fix=f"gregraph edit {doc_id}",
+            )
+        )
+    if has_front_matter(body):
+        findings.append(
+            Finding(
+                code="E-FRONTMATTER-FORBIDDEN",
+                severity="E",
+                subject=doc_id,
+                message="body starts with '---'; YAML front matter is forbidden",
+                fix=f"gregraph edit {doc_id}",
+            )
+        )
+    return tuple(findings)
+
+
+def _managed_document_files(workspace: Workspace, loaded: Any) -> tuple[Path, Path]:
+    """Absolute ``(body, sidecar)`` paths that are safe to read and write.
+
+    Both targets are checked before anything is read or written (spec §3,
+    ``E-PATH-UNSAFE``): a link at either path, or in a folder above it, refuses the
+    save even when the other file is a plain file.
+    """
+    try:
+        return (
+            managed_path(workspace.root, loaded.body),
+            managed_path(workspace.root, loaded.sidecar),
+        )
+    except UnsafePathError as exc:
+        raise OperationRefused(
+            Finding(
+                code="E-PATH-UNSAFE",
+                severity="E",
+                subject=exc.relative,
+                message=f"refusing to write through an unsafe path: {exc.reason}",
+            )
+        ) from exc
+
+
+def update_body(
+    workspace: Workspace,
+    *,
+    doc_id: str,
+    text: str,
+    base_hash: str,
+) -> BodyUpdateResult:
+    """Replace a document's Markdown body from a browser editor (spec §21.5).
+
+    ``base_hash`` is the body hash the editor read (``sha256:`` of the normalised
+    working-tree body, §7.3). When it no longer matches, the save is refused with
+    ``E-BODY-STALE`` and nothing is written. Both target files are checked for
+    unsafe links first (``E-PATH-UNSAFE``). The Markdown is saved exactly as given,
+    except that CRLF and CR become LF (spec §5.2). Trailing spaces (Markdown hard
+    breaks), blank lines and the final newline are kept as typed. The §7.3
+    normalisation applies to the hash only. The existing sync command normalises
+    whole files under its own workflow (§7.5). This operation does not, so a save
+    never rewrites Markdown the user did not change.
+
+    Only the body and, when its H1 differs, the sidecar ``title`` are written.
+    ``version``, ``body_hash``, ``assets``, ``links`` and every other field are left
+    to the commit-time reconcile pass (§7.2, §7.5). A missing H1 or front matter is
+    saved and reported as a finding, not refused. Unknown, malformed, change-request
+    and glossary IDs are refused ``E-ID-UNKNOWN`` (§4.5). The body and the sidecar
+    are two writes, so a crash between them can leave the title stale; the next
+    sync corrects it.
+    """
+    resolved = _resolve_doc_id(workspace, doc_id)
+    loaded = workspace.index.documents[resolved]
+    body_path, sidecar_path = _managed_document_files(workspace, loaded)
+    if not body_path.is_file():
+        raise OperationRefused(
+            Finding(
+                code="E-BODY-MISSING",
+                severity="E",
+                subject=resolved,
+                message="the body file is missing; nothing was written",
+            )
+        )
+    current_text = read_body(body_path)
+    current_hash = body_hash(current_text)
+    if current_hash != base_hash:
+        raise OperationRefused(
+            Finding(
+                code="E-BODY-STALE",
+                severity="E",
+                subject=resolved,
+                message=(
+                    f"body changed since it was read (base {base_hash!r}, "
+                    f"current {current_hash!r}); reload and retry"
+                ),
+                fix=f"gregraph edit {resolved}",
+            )
+        )
+    # Line endings only (spec §5.2). Whitespace and blank lines are not normalised.
+    lf_text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Read and validate the sidecar before anything is written, so a sidecar that
+    # was removed or corrupted after the index was loaded fails the save with no
+    # side effects (the read raises FileNotFoundError or ValidationError).
+    document = read_sidecar(sidecar_path, Document)
+    title = extract_title(lf_text)
+    title_changed = title is not None and document.title != title
+    body_changed = lf_text != current_text
+    if body_changed:
+        write_body_atomic(body_path, lf_text)
+    if title is not None and title_changed:
+        document.title = title
+        write_sidecar(sidecar_path, document)
+    if body_changed or title_changed:
+        workspace.reload()
+    return BodyUpdateResult(
+        id=resolved,
+        body=loaded.body,
+        body_hash=body_hash(lf_text),
+        title=title,
+        changed=body_changed or title_changed,
+        findings=_body_findings(resolved, lf_text),
     )
 
 
