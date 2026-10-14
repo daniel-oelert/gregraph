@@ -1,7 +1,7 @@
 ---
 description: Planning driver; delegates read-only discovery and analysis to subagents.
 mode: primary
-model: openrouter/openai/gpt-6.1-sol
+model: openrouter/google/gemini-4-argon
 permissions:
   - action: subagent
     resource: "*"
