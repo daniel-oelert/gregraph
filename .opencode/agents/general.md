@@ -1,7 +1,7 @@
 ---
-description: Claude Haiku 5.5 worker for delegated file reading, Python implementation, documentation, debugging, and verification.
+description: Worker for delegated file reading, Python implementation, documentation, debugging, and verification.
 mode: subagent
-model: openrouter/anthropic/claude-haiku-5.5
+model: openrouter/z-ai/glm-5.3-flash
 permissions:
   - action: subagent
     resource: "*"
