@@ -1,0 +1,3 @@
+- add better markdown editor https://www.cssscript.com/demo/wysiwyg-text-markdown-editor/
+- add document type to prefix
+- agent readiness
