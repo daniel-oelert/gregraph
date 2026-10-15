@@ -1,7 +1,21 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "openrouter/openai/gpt-6.1-sol",
+  "model": "openrouter/google/gemini-4-argon",
   "default_agent": "build",
   "agents": {
+  },
+  "mcp": {
+    "servers": {
+      "codegraph": {
+        "type": "local",
+        "command": [
+          "codegraph",
+          "serve",
+          "--mcp"
+        ],
+        "disabled": false,
+        "codemode": false
+      }
+    }
   }
 }

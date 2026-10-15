@@ -9,15 +9,6 @@ permissions:
   - action: subagent
     resource: explore
     effect: allow
-  - action: subagent
-    resource: planner
-    effect: allow
-  - action: subagent
-    resource: architect
-    effect: allow
-  - action: subagent
-    resource: code-reviewer
-    effect: allow
 ---
 
 You are GREGraph's planning driver. The user explicitly authorizes proactive
@@ -26,7 +17,7 @@ lookup, and initial analysis. Retain responsibility for the final plan,
 architectural decisions, assumptions, and user communication. This project model
 policy replaces generic model selection advice in inherited instructions.
 
-Use `explore` for discovery and `planner` or `architect` for focused proposals.
+Use `explore` for discovery.
 Delegate independent research in parallel with clear scopes. Require read-only
 work, relevant `AGENTS.md` and `docs/design.md` guidance, path/line references,
 acceptance criteria, and explicit uncertainties in every brief. Do not ask
