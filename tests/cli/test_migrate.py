@@ -221,3 +221,55 @@ def test_migrate_conflicting_selection_is_usage_error(repo: Path) -> None:
 
 def test_migrate_without_selection_is_usage_error(repo: Path) -> None:
     assert main(["--repo", str(repo), "migrate", "--no-input"]) == 2
+
+
+# --------------------------------------------------------------------------
+# --json payload (AGENT_READINESS §2.4.1)
+# --------------------------------------------------------------------------
+
+
+def test_migrate_json_payload(repo: Path, capsys) -> None:
+    """§2.4.1: ``migrate --json`` reports per-item plans and merged notices."""
+    doc = write_doc(repo, "user-story", "Migrate me")
+    write_template_version(
+        repo,
+        "user-story",
+        2,
+        [
+            {"heading": "Story", "required": True, "placeholder": "As a <role>"},
+            {
+                "heading": "Acceptance criteria",
+                "required": True,
+                "placeholder": "Given …",
+            },
+        ],
+    )
+    capsys.readouterr()
+    exit_code = main(["--repo", str(repo), "migrate", doc, "--dry-run", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {"dry_run", "items", "findings", "notices"}
+    assert payload["dry_run"] is True
+    [item] = payload["items"]
+    assert set(item) == {
+        "id",
+        "kind",
+        "from_version",
+        "to_version",
+        "new_id",
+        "renamed",
+        "inserted",
+        "unknown",
+        "unmapped",
+        "manual_attention",
+        "stale_inbound",
+        "findings",
+        "notices",
+    }
+    assert item["id"] == doc
+    assert item["kind"] == "in-place"
+    assert item["from_version"] == 1
+    assert item["to_version"] == 2
+    assert isinstance(payload["findings"], list)
+    assert isinstance(payload["notices"], list)

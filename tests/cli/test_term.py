@@ -8,6 +8,7 @@ mentions without rewriting prose, and refusals. CLI tests invoke
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -168,3 +169,187 @@ def test_term_show_unknown_slug_refused(repo: Path, capsys) -> None:
 
 def test_term_without_subcommand_is_usage_error(repo: Path) -> None:
     assert main(["--repo", str(repo), "term"]) == 2
+
+
+# --------------------------------------------------------------------------
+# --json payloads (AGENT_READINESS §2.4.4) and term add authoring flags (§3.4)
+# --------------------------------------------------------------------------
+
+
+def test_term_add_json_payload(repo: Path, capsys) -> None:
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "term",
+            "add",
+            "Knowledge base",
+            "--alias",
+            "KB",
+            "--section",
+            "Definition=A store of documents.",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {
+        "term",
+        "slug",
+        "aliases",
+        "md_path",
+        "json_path",
+        "sections",
+        "body",
+        "body_hash",
+        "findings",
+        "notices",
+    }
+    assert payload["term"] == "Knowledge base"
+    assert payload["slug"] == "knowledge-base"
+    assert payload["aliases"] == ["KB"]
+    assert payload["md_path"] == "glossary/knowledge-base.md"
+    assert payload["body"] == (repo / "glossary/knowledge-base.md").read_text(
+        encoding="utf-8"
+    )
+    assert "A store of documents." in payload["body"]
+    assert payload["body_hash"].startswith("sha256:")
+    assert [s["heading"] for s in payload["sections"]] == ["Definition", "Notes"]
+
+
+def test_term_add_strict_refuses_placeholder_definition(repo: Path, capsys) -> None:
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "term",
+            "add",
+            "Knowledge base",
+            "--strict",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 4
+    payload = json.loads(out.out)
+    assert payload["error"]["code"] == "E-SECTION-REQUIRED-EMPTY"
+    details = payload["error"]["finding"]["details"]
+    assert details["missing_required"] == ["Definition"]
+    assert not (repo / "glossary" / "knowledge-base.md").exists()
+
+
+def test_term_add_unknown_section_refusal(repo: Path, capsys) -> None:
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "term",
+            "add",
+            "Knowledge base",
+            "--section",
+            "Wrong=content",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 4
+    payload = json.loads(out.out)
+    assert payload["error"]["code"] == "E-SECTION-UNKNOWN"
+    details = payload["error"]["finding"]["details"]
+    assert details["given_heading"] == "Wrong"
+
+
+def test_term_list_show_usage_json(repo: Path, capsys) -> None:
+    mentioning = write_doc(repo, "user-story", "Mentioning story")
+    body = next((repo / "documents").rglob(f"{mentioning}.md"))
+    body.write_text(
+        body.read_text(encoding="utf-8") + "\nThe Knowledge base helps.\n",
+        encoding="utf-8",
+    )
+    assert main(["--repo", str(repo), "term", "add", "Knowledge base"]) == 0
+    capsys.readouterr()
+    assert main(["--repo", str(repo), "term", "list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {"terms"}
+    assert payload["terms"] == [
+        {
+            "term": "Knowledge base",
+            "slug": "knowledge-base",
+            "aliases": [],
+            "version": 1,
+            "deprecated": None,
+        }
+    ]
+    assert main(["--repo", str(repo), "term", "show", "knowledge-base", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {
+        "term",
+        "slug",
+        "aliases",
+        "created",
+        "created_by",
+        "version",
+        "body_hash",
+        "deprecated",
+        "template",
+        "status",
+    }
+    assert payload["term"] == "Knowledge base"
+    assert payload["template"] == {"name": "term", "version": 1}
+    assert payload["created"].endswith("Z")
+    assert main(["--repo", str(repo), "term", "usage", "knowledge-base", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {"slug", "term", "documents"}
+    assert payload["slug"] == "knowledge-base"
+    assert payload["documents"] == [{"id": mentioning, "mentions": ["Knowledge base"]}]
+
+
+def test_term_rename_and_deprecate_json(repo: Path, capsys) -> None:
+    mentioning = write_doc(repo, "user-story", "Mentioning story")
+    body = next((repo / "documents").rglob(f"{mentioning}.md"))
+    body.write_text(
+        body.read_text(encoding="utf-8") + "\nThe Knowledge base helps.\n",
+        encoding="utf-8",
+    )
+    assert main(["--repo", str(repo), "term", "add", "Knowledge base"]) == 0
+    capsys.readouterr()
+    exit_code = main(
+        ["--repo", str(repo), "term", "rename", "knowledge-base", "New name", "--json"]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {
+        "old_slug",
+        "new_slug",
+        "term",
+        "mentioning_documents",
+        "findings",
+        "notices",
+    }
+    assert payload["old_slug"] == "knowledge-base"
+    assert payload["new_slug"] == "new-name"
+    assert payload["term"] == "New name"
+    assert len(payload["mentioning_documents"]) == 1
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "term",
+            "deprecate",
+            "new-name",
+            "--reason",
+            "obsolete",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {"slug", "deprecated", "findings", "notices"}
+    assert payload["slug"] == "new-name"
+    assert payload["deprecated"]["reason"] == "obsolete"

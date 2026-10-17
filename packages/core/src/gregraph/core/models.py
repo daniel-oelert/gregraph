@@ -11,7 +11,8 @@ here next to ``Finding`` (docs/decisions.md ``D-OPREFUSED-HOME``).
 Lists that canonical JSON sorts (§5.4: ``links`` by ``(type, target)``; §9.2:
 ``scope`` by ``id``, ``introduces``) are kept sorted by the models themselves.
 ``Finding.model_dump`` emits the §14 report shape (``id``/``path`` key chosen by
-subject type; ``fix`` omitted when absent). Pure data only — no I/O, no printing.
+subject type; ``fix`` and ``details`` omitted when absent). Pure data only —
+no I/O, no printing.
 """
 
 from __future__ import annotations
@@ -196,8 +197,10 @@ class Finding(BaseModel):
     """Validation finding; serialises to the §14 ``validate --json`` shape.
 
     ``subject`` is a document/CR ID (``str``) or a repository-relative path
-    (``pathlib.Path``); the JSON key is ``id`` or ``path`` accordingly, and
-    ``fix`` is omitted when there is no suggested command.
+    (``pathlib.Path``); the JSON key is ``id`` or ``path`` accordingly,
+    ``fix`` is omitted when there is no suggested command, and ``details``
+    (optional machine-readable context, AGENT_READINESS §2.2) is omitted
+    when absent.
     """
 
     code: str
@@ -205,6 +208,7 @@ class Finding(BaseModel):
     subject: str | Path
     message: str
     fix: str | None = None
+    details: dict[str, Any] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -237,6 +241,8 @@ class Finding(BaseModel):
         item["message"] = self.message
         if self.fix is not None:
             item["fix"] = self.fix
+        if self.details is not None:
+            item["details"] = self.details
         return item
 
 

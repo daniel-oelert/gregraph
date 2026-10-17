@@ -13,7 +13,7 @@ interactive re-point) → format.
 from __future__ import annotations
 
 import argparse
-from typing import cast
+from typing import Any, cast
 
 from gregraph.cli.main import App, UsageError
 from gregraph.cli.prompts import PickRow, pick
@@ -25,10 +25,14 @@ from gregraph.core.operations import (
     link_refresh,
     unlink,
 )
+from gregraph.core.validation import report_payload
 from gregraph.core.workspace import Workspace
 
 #: Edge types never re-pointed by refresh (spec §7.6, §11.2, D-S12 (3)).
 _NEVER_REPOINT = frozenset({"supersedes", "conflicts-with"})
+
+#: Why a link is stale (§13.5): its target was superseded.
+_STALE_REASON = "superseded"
 
 
 def _link_rows(workspace: Workspace) -> list[tuple[str, str, str]]:
@@ -112,9 +116,48 @@ def run(args: argparse.Namespace, app: App) -> int:
         follow=args.follow,
         dry_run=args.dry_run,
     )
+    if app.out.json_mode:
+        # The interactive re-point of stale links cannot be part of a
+        # machine-readable call; stale links travel in the payload instead.
+        app.out.json(_payload(app, result))
+        return 0
     _print_refreshed(app, result)
     _handle_stale(app, workspace, result)
     return 0
+
+
+def _payload(app: App, result: RefreshResult) -> dict[str, Any]:
+    """The ``link refresh --json`` payload (AGENT_READINESS §2.4.2)."""
+    return {
+        "refreshed": [
+            {
+                "source": entry.source,
+                "type": entry.type,
+                "old_target": entry.old_target,
+                "new_target": entry.new_target,
+                "old_target_version": entry.old_target_version,
+                "new_target_version": entry.new_target_version,
+                "repointed": entry.repointed,
+            }
+            for entry in result.refreshed
+        ],
+        "stale": [_stale_payload(entry) for entry in result.stale],
+        "dry_run": result.dry_run,
+        "findings": report_payload(result.findings),
+        "notices": [*app.recorded_notes, *result.notices],
+    }
+
+
+def _stale_payload(entry: StaleLink) -> dict[str, Any]:
+    return {
+        "source": entry.source,
+        "type": entry.type,
+        "target": entry.target,
+        "reason": _STALE_REASON,
+        "chain": list(entry.chain.path),
+        "fork_at": entry.fork_at,
+        "fork_successors": list(entry.fork_successors),
+    }
 
 
 def _print_refreshed(app: App, result: RefreshResult) -> None:

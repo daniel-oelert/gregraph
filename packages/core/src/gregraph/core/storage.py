@@ -255,6 +255,17 @@ def read_body(path: Path) -> str:
         return handle.read()
 
 
+def read_text_file(path: Path) -> str:
+    """Read any text file as UTF-8 with line endings normalised to LF.
+
+    Small core helper for CLI file inputs (``--section-file``, ``--body-file``):
+    the CLI never touches the filesystem directly, so file payloads are read
+    through core (AGENT_READINESS §3.5). stdin is read by the CLI itself.
+    """
+    text = path.read_text(encoding="utf-8")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def write_body(path: Path, text: str) -> None:
     """Write a Markdown body as UTF-8 without BOM and LF line endings (spec §5.2)."""
     path.parent.mkdir(parents=True, exist_ok=True)

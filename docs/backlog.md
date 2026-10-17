@@ -432,6 +432,16 @@ version; until then `validate` reports it literally (§14) while `check` drops
 the findings its own would-be bump would resolve so its exit code matches
 `hook pre-commit` (which bumps first, §7.5 step order).
 
+RESOLVED (r0.4, D-AGENT-7 with D-AGENT-3; see docs/decisions.md): the
+invariant is `target_version <= effective version`. `validate` compares
+against the target's *effective* version: a match against an unbumped
+target is `W-LINK-PENDING` (fix `gregraph sync --bump`), only
+`target_version > effective_version` is `E-LINK-VERSION-AHEAD`. The
+uncommitted-`v1` grace period makes the effective version of a fresh draft
+`1`. `check`/`hook pre-commit` and `validate` now agree; the hook's
+ad-hoc suppression is redundant and removed. Spec updated in
+`docs/design.md` §7.4/§14.
+
 SPEC-QUESTION: §7.5 defines newly outdated links as "those whose target is in
 the bumped set and target_version < new version", which includes links that
 were *already* outdated before the commit — but §7.1 refinement 2 says links
@@ -558,6 +568,14 @@ around by rewording the prose. Should mention scanning require the
 configured prefix, an existing ID body, or the canonical uppercase form?
 §5.2's "mentions a document ID" is ambiguous for hyphenated prose.
 
+RESOLVED (r0.4, D-AGENT-6; see docs/decisions.md): mentions are recognised
+only in explicit syntax — `[[ID]]`, `[[ID|label]]`, or a Markdown link
+whose target or text matches the canonical uppercase ID pattern or
+resolves to a managed `.md` path. Bare ID-shaped tokens are never
+mentions, so hyphenated prose is inert; the canonical-uppercase requirement
+also removes the case-insensitivity surprise. Spec updated in
+`docs/design.md` §4.5/§5.2/§9.7/§14.
+
 SPEC-QUESTION (confirmation of the §7.4 effective-version question above):
 the M6 seeding hit the `E-LINK-VERSION-AHEAD` vs effective-version
 contradiction in a pure CLI run — `link`/`new --link` records
@@ -565,6 +583,13 @@ contradiction in a pure CLI run — `link`/`new --link` records
 which `validate` reports as an *error* until the hook bumps the target.
 Seeding ordered content commits before link commits to avoid it; no
 behaviour change in 0.1.1.
+
+RESOLVED (r0.4, D-AGENT-7 with D-AGENT-3; see docs/decisions.md): same
+answer as the §7.4 question above — freshness is measured against the
+target's effective version (`W-LINK-PENDING` instead of
+`E-LINK-VERSION-AHEAD`), and the uncommitted-`v1` grace period keeps a
+fresh draft's effective version at `1`, so the seeding workaround
+(content-before-link commit ordering) is no longer needed.
 
 SPEC-QUESTION (new): `GitAdapter.is_repo()` is documented as "Whether the
 working directory root is a Git repository" but implements "is inside a
@@ -584,6 +609,15 @@ lands at version 2 in its first hook commit (the stored v1 hash is the
 template skeleton's; §7.2's hash-based bump at the first commit is
 correct). The v1 skeleton is never committed. A body input on `new` (flag or
 stdin) would let version 1 be the real content; v0.2 idea.
+
+RESOLVED (r0.4, D-AGENT-3 with D-AGENT-4; see docs/decisions.md): two
+halves. (1) `--body`/`--body-file` exist on `new` (and `supersede`,
+`edit`), so `v1` hashes the real content at creation. (2) The
+uncommitted-`v1` initial-grace period populates `version 1` in place on
+reconcile while the document is absent from `HEAD`, so the file-first
+workflow (create with `new --json`, fill in the returned `md_path`) lands
+its first commit as the real `v1`, not a fabricated `v2`. Degraded mode
+keeps the old bump-on-`sync` semantics.
 
 ## Accepted residual risks (optional web UI, design §21.5)
 

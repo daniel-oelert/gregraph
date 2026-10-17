@@ -9,6 +9,7 @@ tracking (§9.5), and refusals. CLI tests invoke
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -198,3 +199,168 @@ def test_supersede_picker_selects_target(repo: Path, monkeypatch, capsys) -> Non
     ]
     assert len(replacements) == 1
     assert replacements[0].id != old
+
+
+# --------------------------------------------------------------------------
+# --json payload and authoring flags (AGENT_READINESS §2.4.1, §3.4)
+# --------------------------------------------------------------------------
+
+
+def test_supersede_json_payload_embeds_the_new_document(repo: Path, capsys) -> None:
+    _source, old, _target = new_documents(repo)
+    capsys.readouterr()
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "supersede",
+            old,
+            "--title",
+            "Upload from the desktop (v2)",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {
+        "old",
+        "new",
+        "supersedes",
+        "copied_links",
+        "skipped_links",
+        "stale_inbound",
+        "findings",
+        "notices",
+    }
+    assert payload["old"] == [old]
+    assert payload["supersedes"] == [old]
+    new = payload["new"]
+    assert set(new) == {
+        "id",
+        "uuid",
+        "type",
+        "kind",
+        "md_path",
+        "json_path",
+        "template",
+        "version",
+        "body_hash",
+        "sections",
+        "body",
+        "sidecar",
+        "links",
+    }
+    assert new["body"] == (repo / new["md_path"]).read_text(encoding="utf-8")
+    assert ("supersedes", old, old) in [
+        (link["type"], link["target"], old) for link in new["links"]
+    ]
+    stale = payload["stale_inbound"][0]
+    assert stale["source"] == _source
+    assert stale["type"] == "depends-on"
+    assert stale["target"] == old
+
+
+def test_supersede_section_flags_shape_the_new_body(repo: Path, capsys) -> None:
+    _source, old, _target = new_documents(repo)
+    capsys.readouterr()
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "supersede",
+            old,
+            "--title",
+            "Fresh sections",
+            "--no-copy-body",
+            "--section",
+            "Story=As an agent, I want a rewrite.",
+            "--section",
+            "Acceptance criteria=Given rewrite, When run, Then ok.",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    body = payload["new"]["body"]
+    assert "As an agent, I want a rewrite." in body
+    assert "Given rewrite, When run, Then ok." in body
+    assert "*Explain why this story matters.*" in body  # unmentioned → placeholder
+
+
+def test_supersede_strict_refuses_placeholder_copies(repo: Path, capsys) -> None:
+    """§3.4 rule 6: ``--strict`` validates the assembled body at write time."""
+    _source, old, _target = new_documents(repo)
+    # A skeleton target: --no-copy-body renders placeholders; strict refuses.
+    skeleton = write_doc(repo, "user-story", "Skeleton")
+    next((repo / "documents").rglob(f"{skeleton}.md")).write_text(
+        "# Skeleton\n\n## Story\n\n*As a <role>, I want <capability>, so that "
+        "<benefit>.*\n\n## Acceptance criteria\n\n*Given … When … Then …*\n",
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "supersede",
+            skeleton,
+            "--title",
+            "Strict replacement",
+            "--no-copy-body",
+            "--strict",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 4
+    payload = json.loads(out.out)
+    assert payload["error"]["code"] == "E-SECTION-REQUIRED-EMPTY"
+    details = payload["error"]["finding"]["details"]
+    assert sorted(details["missing_required"]) == ["Acceptance criteria", "Story"]
+    assert document_by_title_safe(repo, "Strict replacement") is None
+
+
+def document_by_title_safe(root: Path, title: str) -> Document | None:
+    for path in (root / "documents").rglob("*.json"):
+        model = read_sidecar(path, Document)
+        if model.title == title:
+            return model
+    return None
+
+
+def test_supersede_unknown_section_refusal_is_self_describing(
+    repo: Path, capsys
+) -> None:
+    _source, old, _target = new_documents(repo)
+    capsys.readouterr()
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "supersede",
+            old,
+            "--title",
+            "T",
+            "--section",
+            "Wrong Heading=x",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 4
+    payload = json.loads(out.out)
+    assert payload["error"]["code"] == "E-SECTION-UNKNOWN"
+    details = payload["error"]["finding"]["details"]
+    assert details["given_heading"] == "Wrong Heading"
+    assert [s["heading"] for s in details["template_sections"]] == [
+        "Story",
+        "Acceptance criteria",
+        "Rationale",
+        "Notes",
+    ]

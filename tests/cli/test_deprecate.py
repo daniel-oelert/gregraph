@@ -9,6 +9,7 @@ errors and refusals exit 2/4 (spec §16.2). CLI tests invoke
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -236,3 +237,72 @@ def test_undeprecate_interactive_picks_document(
     monkeypatch.setattr("sys.stdin", FakeTTY(f"{target}\n"))
     assert main(["--repo", str(repo), "undeprecate"]) == 0
     assert f"undeprecated {target}" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# --json payloads (AGENT_READINESS §2.4.1)
+# --------------------------------------------------------------------------
+
+
+def test_deprecate_json_payload(repo: Path, capsys) -> None:
+    _source, target = chain(repo)
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "deprecate",
+            target,
+            "--reason",
+            "superseded by design",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {
+        "id",
+        "changed",
+        "deprecated",
+        "stale_inbound",
+        "findings",
+        "notices",
+    }
+    assert payload["id"] == target
+    assert payload["changed"] is True
+    assert payload["deprecated"]["reason"] == "superseded by design"
+    assert payload["stale_inbound"] == [
+        {
+            "source": _source,
+            "type": "depends-on",
+            "target": target,
+            "target_version": 1,
+        }
+    ]
+
+
+def test_undeprecate_json_payload(repo: Path, capsys) -> None:
+    _source, target = chain(repo)
+    assert (
+        main(["--repo", str(repo), "deprecate", target, "--reason", "r", "--no-input"])
+        == 0
+    )
+    capsys.readouterr()
+    exit_code = main(
+        ["--repo", str(repo), "undeprecate", target, "--no-input", "--json"]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {
+        "id",
+        "changed",
+        "deprecated",
+        "stale_inbound",
+        "findings",
+        "notices",
+    }
+    assert payload["changed"] is True
+    assert payload["deprecated"] is None
+    assert payload["stale_inbound"] == []

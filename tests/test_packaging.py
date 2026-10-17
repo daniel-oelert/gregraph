@@ -50,6 +50,7 @@ DEV_GROUP = {
 }
 CORE_MODULES = {
     "__init__.py",
+    "agents.py",
     "changes.py",
     "config.py",
     "git.py",
@@ -74,6 +75,7 @@ CLI_COMMANDS = {
     "__init__.py",
     "baseline.py",
     "check.py",
+    "context.py",
     "cr.py",
     "deprecate.py",
     "edit.py",
@@ -87,6 +89,8 @@ CLI_COMMANDS = {
     "new.py",
     "refresh.py",
     "repair.py",
+    "schema.py",
+    "sections.py",
     "serve.py",
     "set.py",
     "show.py",

@@ -17,11 +17,22 @@ changes/<ID>.md + <ID>.json                   # change requests (not in the grap
 glossary/<slug>.md + <slug>.json              # glossary terms (not in the graph)
 assets/<ID>/…                                 # files owned by document <ID>
 .gregraph/templates/<name>/<vN>/              # repository-local templates
+AGENTS.md                                     # agent instructions (managed block)
+.agents/skills/gregraph/SKILL.md              # full agent skill, tool-owned
 ```
 
 Everything the tool stores is text you can read, diff and merge with Git.
 The tool adds a cache under `.gregraph/` and a pre-commit hook; it never
 hides state outside the repository. (§3)
+
+`gregraph init` also writes two instruction files for coding agents:
+`AGENTS.md` carries a delimited managed block with the golden rules (never
+touch sidecars or `.gregraph/`, no front matter, `--no-input --json` for
+automation, explicit `[[ID]]` references); if the file already exists, your
+content is preserved and only the block is added. `.agents/skills/gregraph/SKILL.md`
+is the full operating manual, wholly owned by the tool. Both are refreshed
+by `gregraph sync` and `gregraph repair agents`, so they stay correct after
+a tool upgrade or config change.
 
 Without Git the tool still works (**degraded mode**): draft/active status is
 reported as `unknown`, version bumps move to `gregraph sync`, and features
@@ -55,6 +66,18 @@ Each document body follows a **template**: a versioned Markdown skeleton
 (sections with placeholder text) plus a JSON descriptor. Documents pin their
 template name and version, so evolving a template never invalidates existing
 documents by itself. Extra sections are warnings, not errors. (§5.5)
+
+**Referring to other documents in prose** uses explicit syntax only: a
+wikilink `[[RE-7F3K2Q]]` or `[[RE-7F3K2Q|a label]]`, or a Markdown link
+whose target or text names the ID (or resolves to the document's `.md`
+path), e.g. `[RE-7F3K2Q](../features/RE-7F3K2Q.md)`. Mention IDs are
+canonical uppercase — input arguments stay case-insensitive, prose does
+not. A bare ID-shaped word in text ("multi-target", "baseline-branch") is
+ordinary prose, never a mention, so validation never fires on it; mentions
+inside code spans, fenced code and HTML are ignored too. A mention is not a
+graph edge: `validate` warns `W-MENTION-UNLINKED` when an explicitly
+mentioned document has no edge in either direction, and refuses
+`E-MENTION-UNKNOWN` when an explicit mention matches nothing. (§4.5, §5.2)
 
 ## The graph
 
@@ -106,19 +129,37 @@ exactly that:
 - In Git mode the bump happens in the **pre-commit hook**, for staged files:
   uncommitted edits are visible as "modified, unbumped" but do not change
   any version. In degraded mode `gregraph sync` does the bumping.
+- **Initial-grace period.** A freshly created document (or CR, or glossary
+  term) that is still at `version 1` and not yet committed gets a one-time
+  grace window: while it is absent from Git `HEAD`, edits *populate version
+  1 in place* instead of preparing a `v2`. The first hook commit is
+  therefore the document's real first version — not a fabricated `v2` of the
+  template skeleton. Once the document has appeared in `HEAD`, normal
+  bumping resumes. (Degraded mode has no grace period: there `sync` *is* the
+  versioning act.) (§7.2)
 - Each link records `target_version` — the version of the target it was
   confirmed against. `gregraph link refresh` sets it (to the target's
   *effective* version, so you can edit the target and refresh inbound links
-  in one commit).
+  in one commit). The effective version of an uncommitted `v1` document in
+  the grace window is `1`, so links recorded at creation time stay fresh
+  across the first commit. (§7.4)
 
 Link states (§7.4):
 
 | State | Meaning |
 |---|---|
-| **fresh** | `target_version` equals the target's current version. |
+| **fresh** | `target_version` equals the target's current (effective) version. |
 | **outdated** | The target changed after the link was last confirmed — re-read and refresh, or unlink. |
 | **stale** | The target is superseded or deprecated; consider re-pointing to the successor. |
-| **pending-outdated** | The target has unbumped modifications; this link *will* become outdated at the next commit (`check`/`status` show it in advance). |
+| **pending-outdated** | The target has unbumped modifications and the link was confirmed against that pending content; this link *will* become outdated at the next commit (`check`/`status` show it in advance). |
+
+The same distinction drives validation: a link matching a target with
+unbumped modifications is the warning `W-LINK-PENDING` (fix:
+`gregraph sync --bump`, or simply the commit in progress), **not** an error.
+Only a `target_version` beyond the target's effective version is the real
+error `E-LINK-VERSION-AHEAD` — a merge mishap that `repair versions` clamps.
+So an edit-plus-refresh in one commit validates clean instead of flagging
+the very state the tool just created.
 
 The hook **blocks** a commit that would newly outdate links (configurable:
 `versioning.on_outdated_links = "block" | "warn"`). Links that were already
@@ -237,6 +278,27 @@ versioned like documents and referenced by *mention*:
 `gregraph term usage` lists the documents whose bodies use a term or alias;
 `term rename` moves the files and lists the mentions but never rewrites
 prose — bodies are human-owned.
+
+## Reading the rulebook and the context
+
+Two commands answer the questions a reader (human or agent) would otherwise
+resolve by reading configuration files:
+
+- `gregraph schema` prints the repository's rulebook in one call: the
+  configured types and their kinds, the five kinds, all nine edge types with
+  their kind rules and mutual exclusions, the active templates with their
+  required sections, and the CR lifecycle. `--json` emits it
+  machine-readably; `--type T` narrows to one type.
+- `gregraph context ID…` packs everything needed to work against one or more
+  documents: their full bodies and sections, their neighbours (with edge
+  type, direction, depth and freshness), the glossary terms used in those
+  bodies, and the validation findings affecting the subgraph — one call
+  instead of a `show` per document plus manual link chasing. Human output is
+  one Markdown document; `--json` is one bundle object.
+
+Related conveniences: `link --candidates SOURCE` lists the admissible link
+targets without linking, `show` accepts several IDs, and `list --body`
+includes full bodies in the JSON output. (§13.24, §13.25)
 
 ## Where to go next
 

@@ -1,10 +1,12 @@
-"""``gregraph term`` (spec §13.20, §10): glossary terms.
+"""``gregraph term`` (spec §13.20, §10, AGENT_READINESS §2.4.4): glossary terms.
 
 Terms are first-class non-graph entities (§10.1) identified by slug.
-``add`` creates ``glossary/<slug>.md`` + ``<slug>.json``; ``usage`` lists
-documents mentioning the name or an alias (informational, no edges);
-``rename`` moves the files and lists mentions without rewriting prose;
-``deprecate`` sets the deprecation flag. Thin: parse →
+``add`` creates ``glossary/<slug>.md`` + ``<slug>.json`` and takes the
+template-guided ``--section*``/``--strict`` flags (§3.4; no whole-body
+flags); ``usage`` lists documents mentioning the name or an alias
+(informational, no edges); ``rename`` moves the files and lists mentions
+without rewriting prose; ``deprecate`` sets the deprecation flag. Every
+subcommand supports ``--json``. Thin: parse →
 ``gregraph.core.operations.term_*`` → format.
 """
 
@@ -15,7 +17,9 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Any
 
+from gregraph.cli.commands.sections import parse_content_args
 from gregraph.cli.main import App, UsageError
 from gregraph.cli.prompts import prompt_text
 from gregraph.core.operations import (
@@ -31,6 +35,7 @@ from gregraph.core.operations import (
     term_show,
     term_usage,
 )
+from gregraph.core.validation import report_payload
 from gregraph.core.workspace import Workspace
 
 
@@ -73,14 +78,41 @@ def open_editor(app: App, root: Path, body: Path) -> None:
 
 
 def _add(args: argparse.Namespace, app: App, workspace: Workspace) -> int:
+    content = parse_content_args(args, allow_body=False)
+    strict = bool(getattr(args, "strict", False))
     name = args.term
     if not name:
         raise UsageError("missing term text")
-    result = term_add(workspace, term=name, aliases=args.alias)
+    result = term_add(
+        workspace,
+        term=name,
+        aliases=args.alias,
+        sections=content.sections,
+        strict=strict,
+    )
+    if app.out.json_mode:
+        app.out.json(_add_payload(app, result))
+        return 0
     _print_add(app, result)
     if args.edit:
         open_editor(app, workspace.root, result.body)
     return 0
+
+
+def _add_payload(app: App, result: TermAddResult) -> dict[str, Any]:
+    """The ``term add --json`` payload (§2.4.4): the rich ``new`` shape."""
+    return {
+        "term": result.term,
+        "slug": result.slug,
+        "aliases": list(result.aliases),
+        "md_path": result.body.as_posix(),
+        "json_path": result.sidecar.as_posix(),
+        "sections": [section.model_dump(mode="json") for section in result.sections],
+        "body": result.body_text,
+        "body_hash": result.body_hash,
+        "findings": report_payload(result.findings),
+        "notices": [*app.recorded_notes, *result.notices],
+    }
 
 
 def _print_add(app: App, result: TermAddResult) -> None:
@@ -92,6 +124,26 @@ def _print_add(app: App, result: TermAddResult) -> None:
 
 
 def _list(app: App, result: TermListResult) -> int:
+    if app.out.json_mode:
+        app.out.json(
+            {
+                "terms": [
+                    {
+                        "term": info.term,
+                        "slug": info.slug,
+                        "aliases": list(info.aliases),
+                        "version": info.version,
+                        "deprecated": (
+                            info.deprecated.model_dump(mode="json")
+                            if info.deprecated is not None
+                            else None
+                        ),
+                    }
+                    for info in result.terms
+                ]
+            }
+        )
+        return 0
     app.out.table(
         ["SLUG", "TERM", "ALIASES", "VERSION", "STATUS"],
         [
@@ -109,6 +161,9 @@ def _list(app: App, result: TermListResult) -> int:
 
 
 def _show(app: App, info: TermInfo) -> int:
+    if app.out.json_mode:
+        app.out.json(_show_payload(info))
+        return 0
     out = app.out
     out.line(f"{info.slug}  {info.term}")
     created = info.created.isoformat().replace("+00:00", "Z")
@@ -135,7 +190,43 @@ def _show(app: App, info: TermInfo) -> int:
     return 0
 
 
+def _show_payload(info: TermInfo) -> dict[str, Any]:
+    """The ``term show --json`` payload (§2.4.4)."""
+    return {
+        "term": info.term,
+        "slug": info.slug,
+        "aliases": list(info.aliases),
+        "created": info.created.isoformat().replace("+00:00", "Z"),
+        "created_by": (
+            info.created_by.model_dump(mode="json")
+            if info.created_by is not None
+            else None
+        ),
+        "version": info.version,
+        "body_hash": info.body_hash,
+        "deprecated": (
+            info.deprecated.model_dump(mode="json")
+            if info.deprecated is not None
+            else None
+        ),
+        "template": info.template.model_dump(mode="json"),
+        "status": info.status,
+    }
+
+
 def _usage(app: App, result: TermUsageResult) -> int:
+    if app.out.json_mode:
+        app.out.json(
+            {
+                "slug": result.slug,
+                "term": result.term,
+                "documents": [
+                    {"id": mention.id, "mentions": list(mention.matched)}
+                    for mention in result.mentions
+                ],
+            }
+        )
+        return 0
     out = app.out
     out.line(f"{result.slug} ({', '.join(result.names)})")
     if not result.mentions:
@@ -150,6 +241,18 @@ def _usage(app: App, result: TermUsageResult) -> int:
 
 
 def _rename(app: App, result: TermRenameResult) -> int:
+    if app.out.json_mode:
+        app.out.json(
+            {
+                "old_slug": result.old_slug,
+                "new_slug": result.slug,
+                "term": result.term,
+                "mentioning_documents": [mention.id for mention in result.mentions],
+                "findings": report_payload(result.findings),
+                "notices": [*app.recorded_notes, *result.notices],
+            }
+        )
+        return 0
     out = app.out
     for notice in result.notices:
         out.warn(notice)
@@ -175,6 +278,20 @@ def _deprecate(args: argparse.Namespace, app: App, workspace: Workspace) -> int:
         if reason is None:
             raise UsageError("cancelled: no reason given")
     result = term_deprecate(workspace, args.slug, reason=reason)
+    if app.out.json_mode:
+        app.out.json(
+            {
+                "slug": result.slug,
+                "deprecated": (
+                    result.deprecated.model_dump(mode="json")
+                    if result.deprecated is not None
+                    else None
+                ),
+                "findings": report_payload(result.findings),
+                "notices": [*app.recorded_notes, *result.notices],
+            }
+        )
+        return 0
     for notice in result.notices:
         app.out.warn(notice)
     if result.changed:

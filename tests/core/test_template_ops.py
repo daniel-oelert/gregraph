@@ -660,7 +660,7 @@ def _duplicate_fixture(root: Path) -> None:
         "RE-2K7QMB",
         folder="other",
         title="Linking",
-        body="# Linking\n\nSee RE-7F3K2Q for details.\n",
+        body="# Linking\n\nSee [[RE-7F3K2Q]] for details.\n",
         links=(("refines", "RE-7F3K2Q"),),
     )
 

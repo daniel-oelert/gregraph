@@ -1,20 +1,39 @@
-"""``gregraph set`` (spec §13.6): set tags or extra fields on a document.
+"""``gregraph set`` (spec §13.6, AGENT_READINESS §2.4.1): set tags or extra.
 
 ``tags=a,b`` replaces, ``tags+=x``/``tags-=x`` add/remove, ``extra.<name>=v``
 sets and ``extra.<name>=`` removes. Everything else is refused with a pointer
 to the right command (``title`` → edit the H1, ``type`` → supersede, …).
-Prompts for the document and the assignments when interactive. Thin: parse →
+Prompts for the document and the assignments when interactive. ``--json``
+emits ``{id, applied, findings, notices}`` with ``applied`` mapping each given
+assignment's key to its value. Thin: parse →
 :func:`gregraph.core.operations.set_fields` → format.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 
 from gregraph.cli.commands import document_pick_rows
 from gregraph.cli.main import App, UsageError
 from gregraph.cli.prompts import pick, prompt_text
 from gregraph.core.operations import set_fields
+from gregraph.core.validation import report_payload
+
+
+def applied_assignments(assignments: Sequence[str]) -> dict[str, str]:
+    """``{key: value}`` of the given ``key=value`` assignments (§2.4.1).
+
+    The key is everything before the first ``=`` (``tags``, ``tags+``,
+    ``tags-``, ``extra.<name>``); assignments without ``=`` cannot happen —
+    core refuses them (``E-SET-VALUE``).
+    """
+    applied: dict[str, str] = {}
+    for text in assignments:
+        key, separator, value = text.partition("=")
+        if separator:
+            applied[key] = value
+    return applied
 
 
 def run(args: argparse.Namespace, app: App) -> int:
@@ -49,6 +68,16 @@ def run(args: argparse.Namespace, app: App) -> int:
     result = set_fields(workspace, doc_id=doc_id, assignments=assignments)
     for notice in result.notices:
         app.out.warn(notice)
+    if app.out.json_mode:
+        app.out.json(
+            {
+                "id": result.id,
+                "applied": applied_assignments(assignments),
+                "findings": report_payload(result.findings),
+                "notices": [*app.recorded_notes, *result.notices],
+            }
+        )
+        return 0
     if result.changed:
         app.out.line(f"updated {result.id}")
     else:

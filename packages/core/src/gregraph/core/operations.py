@@ -35,7 +35,7 @@ import shlex
 import shutil
 import subprocess
 import unicodedata
-from collections.abc import Sequence, Set
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from importlib.resources import files as resource_files
 from importlib.resources.abc import Traversable
@@ -44,7 +44,7 @@ from typing import Any, Final, Literal, cast
 from uuid import UUID
 
 from gregraph import __version__
-from gregraph.core import changes, hooks, versioning
+from gregraph.core import agents, changes, hooks, versioning
 from gregraph.core.config import Config, GitSection, IdsSection, write_config
 from gregraph.core.git import GitAdapter
 from gregraph.core.graph import Edge, Graph, LinkCheck, Node
@@ -56,10 +56,12 @@ from gregraph.core.hashing import (
 )
 from gregraph.core.ids import generate_id, is_valid_prefix, normalise_id
 from gregraph.core.markdown import (
+    Section,
     extract_title,
     find_asset_refs,
     find_mentions,
     has_front_matter,
+    parse_sections,
 )
 from gregraph.core.mermaid import export_mermaid
 from gregraph.core.models import (
@@ -74,15 +76,24 @@ from gregraph.core.models import (
     OperationRefused,
     TemplateDescriptor,
     TemplateRef,
+    TemplateSection,
     Term,
 )
-from gregraph.core.rules import EDGE_RULES, SYMMETRIC_EDGE_TYPES
+from gregraph.core.rules import (
+    EDGE_RULES,
+    MUTUALLY_EXCLUSIVE_OPPOSITE,
+    MUTUALLY_EXCLUSIVE_SAME_PAIR,
+    SYMMETRIC_EDGE_TYPES,
+    Kind,
+    edge_kind_allowed,
+)
 from gregraph.core.status import Status, StatusReport, WipState, compute_status
 from gregraph.core.storage import (
     ASSETS_DIR,
     CHANGES_DIR,
     DOCUMENTS_DIR,
     GLOSSARY_DIR,
+    TEMPLATES_RELPATH,
     CacheFileEntry,
     CacheIndex,
     ManagedFiles,
@@ -108,10 +119,14 @@ from gregraph.core.storage import (
 from gregraph.core.templates import (
     LoadedTemplate,
     MigrationPlan,
+    assemble_sections,
     check_deprecated,
+    check_required_sections,
     load_template_dir,
     plan_migration,
+    prepare_whole_body,
     render_template,
+    resolve_section_inputs,
     resolve_template,
 )
 from gregraph.core.validation import has_errors, refresh_cache, validate_workspace
@@ -121,14 +136,22 @@ from gregraph.core.workspace import Workspace
 __all__ = [
     "BaselineCreateResult",
     "BaselineListResult",
+    "BodyState",
     "BodyUpdateResult",
     "CheckResult",
+    "ContextEdge",
+    "ContextNeighbor",
+    "ContextResult",
+    "ContextTarget",
+    "ContextTerm",
     "CreateResult",
     "DeprecateResult",
     "DeprecatedTemplateUse",
     "EditResult",
     "ExportGraphResult",
     "InitResult",
+    "LinkCandidate",
+    "LinkCandidatesResult",
     "LinkResult",
     "LinkView",
     "ListResult",
@@ -137,11 +160,17 @@ __all__ = [
     "MigrationItem",
     "RefreshResult",
     "RefreshedLink",
+    "RepairAgentsResult",
     "RepairCacheResult",
     "RepairIdResult",
     "RepairVersionsResult",
     "RepairedSidecar",
     "RewrittenLink",
+    "SchemaCrLifecycle",
+    "SchemaEdgeRule",
+    "SchemaInfo",
+    "SchemaTemplateInfo",
+    "SchemaTypeInfo",
     "SetResult",
     "ShowResult",
     "StaleInbound",
@@ -167,6 +196,8 @@ __all__ = [
     "ValidateResult",
     "baseline_create",
     "baseline_list",
+    "body_state",
+    "build_context",
     "check",
     "create_document",
     "cr_list",
@@ -178,6 +209,7 @@ __all__ = [
     "cr_set",
     "cr_show",
     "deprecate",
+    "describe_schema",
     "derive_term_slug",
     "edit_document",
     "export_graph",
@@ -187,10 +219,12 @@ __all__ = [
     "hooks_uninstall",
     "init_repository",
     "link",
+    "link_candidates",
     "link_refresh",
     "list_documents",
     "migrate",
     "record_introduction",
+    "repair_agents",
     "repair_cache",
     "repair_regenerate_id",
     "repair_versions",
@@ -203,6 +237,7 @@ __all__ = [
     "template_add",
     "template_bump",
     "template_list",
+    "template_sections",
     "template_show",
     "term_add",
     "term_deprecate",
@@ -213,6 +248,7 @@ __all__ = [
     "undeprecate",
     "unlink",
     "update_body",
+    "update_sections",
     "validate",
 ]
 
@@ -269,7 +305,9 @@ _STATE_EXEMPT: Final[frozenset[LinkType]] = frozenset({"supersedes"})
 
 @dataclass(frozen=True, slots=True)
 class CreateResult:
-    """Result of :func:`create_document` (spec §13.2). Paths are repo-relative."""
+    """Result of :func:`create_document` (spec §13.2, §2.4.1). Paths are
+    repository-relative; ``sections``/``body_text``/``sidecar_document``
+    carry the rich authoring payload of AGENT_READINESS §3.2."""
 
     id: str
     uuid: UUID
@@ -280,6 +318,12 @@ class CreateResult:
     links: tuple[Link, ...]
     findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
+    kind: str = ""
+    version: int = 1
+    body_hash: str = ""
+    sections: tuple[TemplateSection, ...] = ()
+    body_text: str = ""
+    sidecar_document: Document | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,6 +337,8 @@ class LinkResult:
     created: bool
     link: Link | None = None
     notice: str | None = None
+    findings: tuple[Finding, ...] = ()
+    notices: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +352,8 @@ class UnlinkResult:
     removed: bool
     removed_from: str | None = None
     notice: str | None = None
+    findings: tuple[Finding, ...] = ()
+    notices: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,6 +406,8 @@ class StaleLink:
     type: LinkType
     target: str
     chain: SupersessionChain
+    fork_at: str | None = None
+    fork_successors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -387,6 +437,10 @@ class BodyUpdateResult:
     title: str | None
     changed: bool
     findings: tuple[Finding, ...] = ()
+    md_path: Path = Path()
+    json_path: Path = Path()
+    sections: tuple[TemplateSection, ...] = ()
+    notices: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,6 +451,7 @@ class SetResult:
     tags: tuple[str, ...]
     extra: dict[str, str]
     changed: bool
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -422,6 +477,7 @@ class SupersedeResult:
     template: TemplateRef
     supersedes: tuple[str, ...]
     copied_links: tuple[Link, ...]
+    new: CreateResult | None = None
     skipped_links: tuple[Finding, ...] = ()
     stale_inbound: tuple[StaleInbound, ...] = ()
     findings: tuple[Finding, ...] = ()
@@ -436,6 +492,7 @@ class DeprecateResult:
     changed: bool
     deprecated: Deprecation | None
     stale_inbound: tuple[StaleInbound, ...] = ()
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -530,16 +587,35 @@ def _has_unbumped_modifications(
     )
 
 
+def _item_in_grace(workspace: Workspace, model: _ItemModel, body_rel: Path) -> bool:
+    """Initial-grace state of a managed item (spec §3.3, AGENT-012).
+
+    A ``v1`` item whose body is absent from Git ``HEAD`` (untracked or
+    staged-but-uncommitted) is being populated: reconcile updates its hashes
+    in place and its effective version stays ``1``. Degraded mode has no
+    commit step and therefore no grace period (AGENT-014).
+    """
+    if not workspace.git.is_repo() or model.version != 1:
+        return False
+    if not (workspace.root / body_rel).is_file():
+        return False
+    return workspace.git.file_at("HEAD", body_rel) is None
+
+
 def _effective_version(workspace: Workspace, doc_id: str) -> int:
     """Target's effective version (spec §7.4): ``version + 1`` when the target
-    has unbumped modifications, else ``version``.
+    has unbumped modifications, else ``version`` — but ``1`` while a ``v1``
+    target is in the initial-grace state (§3.3 rule 3, D-AGENT-3).
 
-    The workspace layer supplies the pre-computed flag
-    :class:`gregraph.core.versioning.UnbumpedMixin` documents.
+    The workspace layer supplies the pre-computed flags of
+    :class:`gregraph.core.versioning.UnbumpedMixin`.
     """
     loaded = workspace.index.documents[doc_id]
     unbumped = _has_unbumped_modifications(workspace, loaded.model, loaded.body)
     object.__setattr__(loaded.model, "_unbumped", unbumped)
+    object.__setattr__(
+        loaded.model, "_in_grace", _item_in_grace(workspace, loaded.model, loaded.body)
+    )
     return effective_version(loaded.model)
 
 
@@ -835,17 +911,26 @@ def create_document(
     tags: Sequence[str] = (),
     links: Sequence[tuple[LinkType, str]] = (),
     cr: str | None = None,
+    sections: Sequence[tuple[str, str]] = (),
+    body_text: str | None = None,
+    strict: bool = False,
 ) -> CreateResult:
-    """Create a document (spec §13.2 `new`).
+    """Create a document (spec §13.2 `new`, §3.4).
 
     Generates the ID (§4.2), renders the resolved template (§5.5), writes the
     body and sidecar pair (§5.4) and creates the initial links, each checked
     like :func:`link` (§13.3) against the graph plus the already-accepted
-    initial links. ``--edit`` is the CLI's job; ``cr`` wires S13's
+    initial links. ``body_text`` (whole-body ``--body``) replaces the skeleton
+    with the tool-owned ``# <title>`` H1 (§3.4 rule 4); ``sections``
+    assembles the body from per-section input in template order; ``strict``
+    requires every required section to be filled at write time (§3.4 rules
+    5–6). ``--edit`` is the CLI's job; ``cr`` wires S13's
     :func:`record_introduction` (origin tracking, §9.5) before any file is
     written. Refusals (unknown type/template, deprecated template, a refused
-    initial link) write nothing.
+    initial link, template-section refusals) write nothing.
     """
+    if sections and body_text is not None:
+        raise ValueError("cannot combine --body and --section")
     spec = workspace.config.types.get(type)
     if spec is None:
         raise OperationRefused(
@@ -867,7 +952,7 @@ def create_document(
     created = _now()
     identity = workspace.git.identity()
     author = identity.name if identity is not None else ""
-    body_text = _render_body(
+    rendered_body = _render_body(
         picked,
         title=title,
         doc_id=generated.id,
@@ -876,6 +961,28 @@ def create_document(
         created=created,
         author=author,
     )
+    body_notices: list[str] = []
+    if body_text is not None:
+        rendered_body, body_notices = prepare_whole_body(body_text, title=title)
+        if strict:
+            check_required_sections(picked.descriptor, rendered_body)
+    elif sections:
+        resolved_sections = resolve_section_inputs(picked.descriptor, sections)
+        rendered_body = assemble_sections(
+            picked.descriptor,
+            title=title,
+            content=resolved_sections,
+            base_body=rendered_body,
+            preserve_existing=False,
+        )
+        check_required_sections(
+            picked.descriptor,
+            rendered_body,
+            provided_headings=set(resolved_sections),
+            require_provided=True,
+        )
+    elif strict:
+        check_required_sections(picked.descriptor, rendered_body)
     abs_body, abs_sidecar = document_paths(workspace.root, spec.folder, generated.id)
     body_rel = abs_body.relative_to(workspace.root)
     sidecar_rel = abs_sidecar.relative_to(workspace.root)
@@ -918,15 +1025,15 @@ def create_document(
         created_by=identity,
         template=TemplateRef(name=picked.name, version=picked.version),
         version=1,
-        body_hash=body_hash(body_text),
-        assets=_compute_assets(workspace, body_rel, body_text, generated.id),
+        body_hash=body_hash(rendered_body),
+        assets=_compute_assets(workspace, body_rel, rendered_body, generated.id),
         links=written,
         deprecated=None,
         tags=list(dict.fromkeys(tags)),
         extra={},
         origin_cr=cr_id,
     )
-    write_body(abs_body, body_text)
+    write_body(abs_body, rendered_body)
     write_sidecar(abs_sidecar, document)
     workspace.reload()
     return CreateResult(
@@ -938,7 +1045,13 @@ def create_document(
         template=document.template,
         links=tuple(written),
         findings=_identity_findings(workspace, generated.id),
-        notices=tuple(notices),
+        notices=tuple([*notices, *body_notices]),
+        kind=spec.kind,
+        version=document.version,
+        body_hash=document.body_hash,
+        sections=tuple(picked.descriptor.sections),
+        body_text=rendered_body,
+        sidecar_document=document,
     )
 
 
@@ -965,12 +1078,14 @@ def link(
     check = workspace.graph.check_link(source_id, edge_type, target_id)
     _raise_if_refused(check)
     if check.outcome == "duplicate":
+        notice = f"edge {source_id} {edge_type} {target_id} already exists"
         return LinkResult(
             source=source_id,
             type=edge_type,
             target=target_id,
             created=False,
-            notice=f"edge {source_id} {edge_type} {target_id} already exists",
+            notice=notice,
+            notices=(notice,),
         )
     entry = Link(
         type=edge_type,
@@ -1023,12 +1138,14 @@ def unlink(
             break
 
     if holder is None or drop is None:
+        notice = f"no edge {source_id} {edge_type} {target_id}"
         return UnlinkResult(
             source=source_id,
             type=edge_type,
             target=target_id,
             removed=False,
-            notice=f"no edge {source_id} {edge_type} {target_id}",
+            notice=notice,
+            notices=(notice,),
         )
     document = _read_doc(workspace, holder)
     document.links = [
@@ -1245,7 +1362,12 @@ def link_refresh(
                 )
             stale.append(
                 StaleLink(
-                    source=source_id, type=edge_type, target=target_id, chain=chain
+                    source=source_id,
+                    type=edge_type,
+                    target=target_id,
+                    chain=chain,
+                    fork_at=chain.fork_at,
+                    fork_successors=chain.fork_successors,
                 )
             )
             findings.append(
@@ -1453,12 +1575,170 @@ def _managed_document_files(workspace: Workspace, loaded: Any) -> tuple[Path, Pa
         ) from exc
 
 
+def _pinned_descriptor(workspace: Workspace, ref: TemplateRef) -> TemplateDescriptor:
+    """Descriptor of the pinned template version; refuses ``E-TEMPLATE-UNKNOWN``."""
+    versions = load_template_dir(templates_dir(workspace.root)).get(ref.name)
+    if versions is not None:
+        for candidate in versions:
+            if candidate.version == ref.version:
+                return candidate.descriptor
+    raise OperationRefused(
+        Finding(
+            code="E-TEMPLATE-UNKNOWN",
+            severity="E",
+            subject=f"{ref.name}/v{ref.version}",
+            message=f"template {ref.name!r} v{ref.version} is not in the repository",
+            fix="gregraph template list",
+        )
+    )
+
+
+def _optional_template_sections(
+    workspace: Workspace, ref: TemplateRef
+) -> tuple[TemplateSection, ...]:
+    """Sections of the pinned template, or ``()`` when it cannot be resolved.
+
+    Metadata for result payloads (§2.4): a document pinned to a template
+    version that is no longer in the repository is a validation finding
+    (``E-TEMPLATE-UNKNOWN``), not a reason to refuse an otherwise valid save.
+    """
+    versions = load_template_dir(templates_dir(workspace.root)).get(ref.name)
+    if versions is not None:
+        for candidate in versions:
+            if candidate.version == ref.version:
+                return tuple(candidate.descriptor.sections)
+    return ()
+
+
+def template_sections(
+    workspace: Workspace, *, template: TemplateRef
+) -> tuple[TemplateSection, ...]:
+    """Sections of one pinned template version (AGENT_READINESS §3.5).
+
+    Refuses ``E-TEMPLATE-UNKNOWN`` when the pinned version is not in the
+    repository. Used by ``new``/``edit``/``schema`` and the CLI section
+    assembly; callers that only decorate a payload use
+    :func:`_optional_template_sections`.
+    """
+    return tuple(_pinned_descriptor(workspace, template).sections)
+
+
+@dataclass(frozen=True, slots=True)
+class BodyState:
+    """Current on-disk body of a document: text, hash, parsed sections.
+
+    ``body_hash`` doubles as the ``base_hash`` of a subsequent
+    :func:`update_body`/`func`:update_sections`` call (spec §21.5, §3.5);
+    ``sections`` are the level-2 sections of ``text``.
+    """
+
+    id: str
+    body: Path
+    text: str
+    body_hash: str
+    sections: tuple[Section, ...]
+
+
+def body_state(workspace: Workspace, *, doc_id: str) -> BodyState:
+    """Read a document's body for editing workflows (AGENT_READINESS §3.5).
+
+    ``E-BODY-MISSING`` when the body file is gone; unknown, malformed,
+    change-request and glossary IDs are refused ``E-ID-UNKNOWN`` (§4.5).
+    """
+    resolved = _resolve_doc_id(workspace, doc_id)
+    loaded = workspace.index.documents[resolved]
+    try:
+        text = read_body(workspace.root / loaded.body)
+    except OSError as exc:
+        raise OperationRefused(
+            Finding(
+                code="E-BODY-MISSING",
+                severity="E",
+                subject=resolved,
+                message="the body file is missing; nothing was written",
+            )
+        ) from exc
+    return BodyState(
+        id=resolved,
+        body=loaded.body,
+        text=text,
+        body_hash=body_hash(text),
+        sections=tuple(parse_sections(text)),
+    )
+
+
+def update_sections(
+    workspace: Workspace,
+    *,
+    doc_id: str,
+    content: Mapping[str, str] | Sequence[tuple[str, str]],
+    base_hash: str,
+    strict: bool = False,
+) -> BodyUpdateResult:
+    """Assemble the body from per-section content and write it (§3.4, §21.5).
+
+    ``content`` maps template-canonical headings to section content; unknown
+    headings refuse ``E-SECTION-UNKNOWN`` with the template's section
+    specification in ``details`` (AGENT-017). Unmentioned sections keep their
+    existing content verbatim, extra level-2 sections are kept at the end
+    (AGENT-016). The staleness guard (``E-BODY-STALE``) runs before assembly
+    so a lost update never merges; required sections must be filled in the
+    assembled body (AGENT-018). The write goes through :func:`update_body`,
+    which syncs the sidecar title from the H1.
+    """
+    resolved = _resolve_doc_id(workspace, doc_id)
+    loaded = workspace.index.documents[resolved]
+    descriptor = _pinned_descriptor(workspace, loaded.model.template)
+    body_path = workspace.root / loaded.body
+    if not body_path.is_file():
+        raise OperationRefused(
+            Finding(
+                code="E-BODY-MISSING",
+                severity="E",
+                subject=resolved,
+                message="the body file is missing; nothing was written",
+            )
+        )
+    current_text = read_body(body_path)
+    current_hash = body_hash(current_text)
+    if current_hash != base_hash:
+        raise OperationRefused(
+            Finding(
+                code="E-BODY-STALE",
+                severity="E",
+                subject=resolved,
+                message=(
+                    f"body changed since it was read (base {base_hash!r}, "
+                    f"current {current_hash!r}); reload and retry"
+                ),
+                fix=f"gregraph edit {resolved}",
+            )
+        )
+    entries: list[tuple[str, str]] = (
+        list(content.items()) if isinstance(content, Mapping) else list(content)
+    )
+    resolved_content = resolve_section_inputs(descriptor, entries)
+    new_body = assemble_sections(
+        descriptor,
+        title=loaded.model.title,
+        content=resolved_content,
+        base_body=current_text,
+        preserve_existing=True,
+    )
+    check_required_sections(descriptor, new_body, subject=resolved)
+    return update_body(
+        workspace, doc_id=resolved, text=new_body, base_hash=base_hash, strict=strict
+    )
+
+
 def update_body(
     workspace: Workspace,
     *,
     doc_id: str,
     text: str,
     base_hash: str,
+    strict: bool = False,
+    notices: Sequence[str] = (),
 ) -> BodyUpdateResult:
     """Replace a document's Markdown body from a browser editor (spec §21.5).
 
@@ -1471,6 +1751,12 @@ def update_body(
     normalisation applies to the hash only. The existing sync command normalises
     whole files under its own workflow (§7.5). This operation does not, so a save
     never rewrites Markdown the user did not change.
+
+    ``strict`` (``edit --strict``, §3.4 rule 6) refuses
+    ``E-SECTION-REQUIRED-EMPTY`` when a required section of the pinned template
+    is empty-or-placeholder in the saved text — checked before anything is
+    written. ``notices`` are carried through to the result (§2.4: the payload's
+    ``notices`` array).
 
     Only the body and, when its H1 differs, the sidecar ``title`` are written.
     ``version``, ``body_hash``, ``assets``, ``links`` and every other field are left
@@ -1509,6 +1795,9 @@ def update_body(
         )
     # Line endings only (spec §5.2). Whitespace and blank lines are not normalised.
     lf_text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if strict:
+        descriptor = _pinned_descriptor(workspace, loaded.model.template)
+        check_required_sections(descriptor, lf_text, subject=resolved)
     # Read and validate the sidecar before anything is written, so a sidecar that
     # was removed or corrupted after the index was loaded fails the save with no
     # side effects (the read raises FileNotFoundError or ValidationError).
@@ -1530,6 +1819,10 @@ def update_body(
         title=title,
         changed=body_changed or title_changed,
         findings=_body_findings(resolved, lf_text),
+        md_path=loaded.body,
+        json_path=loaded.sidecar,
+        sections=_optional_template_sections(workspace, loaded.model.template),
+        notices=tuple(notices),
     )
 
 
@@ -1542,23 +1835,33 @@ def supersede(
     copy_body: bool | None = None,
     copy_links: bool = True,
     cr: str | None = None,
+    sections: Sequence[tuple[str, str]] = (),
+    body_text: str | None = None,
+    strict: bool = False,
 ) -> SupersedeResult:
     """Create one document superseding ``targets`` (spec §7.6, §11.2 pattern 1).
 
     ``NEW supersedes OLD`` for every target (multiple targets = conflict
     compromise, §11.2). ``copy_body`` defaults on when every target pins
     exactly the new document's resolved template; the copied body is the first
-    target's with the H1 replaced (§5.6). ``copy_links`` (default on) copies
-    the targets' outbound edges except ``supersedes`` with their stored
-    ``target_version`` values — each candidate runs the §13.3 checks and
-    failing ones are skipped and listed (``skipped_links``), duplicates
-    collapse. OLD's inbound edges are untouched and listed as stale
-    (``stale_inbound``). ``cr`` records the origin (§9.5) via S13's
-    :func:`record_introduction` and, when OLD is outside the CR's scope, only
-    *suggests* the scope add — scope is part of what was decided (§7.6 step 7).
+    target's with the H1 replaced (§5.6). ``body_text`` (whole-body
+    ``--body``, §3.4 rule 4) replaces the copied/rendered body with the
+    tool-owned ``# <title>`` H1; ``sections`` assembles the body from
+    per-section input over the copied/rendered base; ``strict`` requires every
+    required section to be filled at write time (§3.4 rules 5–6).
+    ``copy_links`` (default on) copies the targets' outbound edges except
+    ``supersedes`` with their stored ``target_version`` values — each
+    candidate runs the §13.3 checks and failing ones are skipped and listed
+    (``skipped_links``), duplicates collapse. OLD's inbound edges are untouched
+    and listed as stale (``stale_inbound``). ``cr`` records the origin (§9.5)
+    via S13's :func:`record_introduction` and, when OLD is outside the CR's
+    scope, only *suggests* the scope add — scope is part of what was decided
+    (§7.6 step 7).
     """
     if not targets:
         raise ValueError("supersede needs at least one target")
+    if sections and body_text is not None:
+        raise ValueError("cannot combine --body and --section")
     old_ids: list[str] = []
     notices: list[str] = []
     for raw in targets:
@@ -1610,19 +1913,12 @@ def supersede(
     body_rel = abs_body.relative_to(workspace.root)
     sidecar_rel = abs_sidecar.relative_to(workspace.root)
     if do_copy_body:
-        body_text = _replace_title(
+        base_body = _replace_title(
             read_body(workspace.root / workspace.index.documents[old_ids[0]].body),
             final_title,
         )
-        for ref in find_asset_refs(body_text, doc_path=body_rel, doc_id=generated.id):
-            if ref.foreign and ref.owner.lower() == old_ids[0].lower():
-                notices.append(
-                    f"copied body references assets/{ref.owner}/; copy those files "
-                    f"into assets/{generated.id}/ (assets are single-owner, §5.7)"
-                )
-                break
     else:
-        body_text = _render_body(
+        base_body = _render_body(
             picked,
             title=final_title,
             doc_id=generated.id,
@@ -1631,6 +1927,38 @@ def supersede(
             created=created,
             author=author,
         )
+    body_notices: list[str] = []
+    if body_text is not None:
+        final_body, body_notices = prepare_whole_body(body_text, title=final_title)
+        if strict:
+            check_required_sections(picked.descriptor, final_body)
+    elif sections:
+        resolved_sections = resolve_section_inputs(picked.descriptor, sections)
+        final_body = assemble_sections(
+            picked.descriptor,
+            title=final_title,
+            content=resolved_sections,
+            base_body=base_body,
+            preserve_existing=do_copy_body,
+        )
+        check_required_sections(
+            picked.descriptor,
+            final_body,
+            provided_headings=None if do_copy_body else set(resolved_sections),
+            require_provided=not do_copy_body,
+        )
+    else:
+        final_body = base_body
+        if strict:
+            check_required_sections(picked.descriptor, final_body)
+    if do_copy_body and body_text is None:
+        for ref in find_asset_refs(final_body, doc_path=body_rel, doc_id=generated.id):
+            if ref.foreign and ref.owner.lower() == old_ids[0].lower():
+                notices.append(
+                    f"copied body references assets/{ref.owner}/; copy those files "
+                    f"into assets/{generated.id}/ (assets are single-owner, §5.7)"
+                )
+                break
 
     node = Node(id=generated.id, kind=spec.kind, title=final_title, deprecated=False)
     graph = _extended_graph(workspace, node, ())
@@ -1701,18 +2029,33 @@ def supersede(
         created_by=identity,
         template=TemplateRef(name=picked.name, version=picked.version),
         version=1,
-        body_hash=body_hash(body_text),
-        assets=_compute_assets(workspace, body_rel, body_text, generated.id),
+        body_hash=body_hash(final_body),
+        assets=_compute_assets(workspace, body_rel, final_body, generated.id),
         links=written,
         deprecated=None,
         tags=[],
         extra={},
         origin_cr=cr_id,
     )
-    write_body(abs_body, body_text)
+    write_body(abs_body, final_body)
     write_sidecar(abs_sidecar, document)
     workspace.reload()
     stale = tuple(item for old in old_ids for item in _stale_inbound(workspace, old))
+    new_result = CreateResult(
+        id=generated.id,
+        uuid=generated.uuid,
+        body=body_rel,
+        sidecar=sidecar_rel,
+        type=type_name,
+        template=document.template,
+        links=tuple(written),
+        kind=spec.kind,
+        version=document.version,
+        body_hash=document.body_hash,
+        sections=tuple(picked.descriptor.sections),
+        body_text=final_body,
+        sidecar_document=document,
+    )
     return SupersedeResult(
         id=generated.id,
         uuid=generated.uuid,
@@ -1722,10 +2065,11 @@ def supersede(
         template=document.template,
         supersedes=tuple(old_ids),
         copied_links=tuple(copied),
+        new=new_result,
         skipped_links=tuple(skipped),
         stale_inbound=stale,
         findings=_identity_findings(workspace, generated.id),
-        notices=tuple(notices),
+        notices=tuple([*notices, *body_notices]),
     )
 
 
@@ -1824,6 +2168,8 @@ class InitResult:
     templates: tuple[str, ...]
     git_initialised: bool
     hooks_installed: bool
+    agents_files: tuple[Path, ...] = ()
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -1840,6 +2186,7 @@ class ListRow:
     created: dt.datetime
     tags: tuple[str, ...]
     document: Document
+    body: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1927,6 +2274,11 @@ def _link_freshness(workspace: Workspace) -> versioning.FreshnessTable:
         links,
         deprecated_or_superseded=stale_targets,
         unbumped=unbumped_targets,
+        in_grace={
+            doc_id: True
+            for doc_id, loaded in index.documents.items()
+            if _item_in_grace(workspace, loaded.model, loaded.body)
+        },
     )
 
 
@@ -1947,6 +2299,14 @@ def _git_run(root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
         timeout=30,
         check=False,
     )
+
+
+def _body_text_or_none(root: Path, body_rel: Path) -> str | None:
+    """Body text of a managed document, or ``None`` when unreadable (§6.3)."""
+    try:
+        return read_body(root / body_rel)
+    except OSError:
+        return None
 
 
 def init_repository(
@@ -2075,12 +2435,16 @@ def init_repository(
         else:
             notices.append("not a git repository; pre-commit hook not installed")
 
+    # Agent scaffolding (AGENT_READINESS §7.1, AGENT-031): AGENTS.md with the
+    # managed block and the wholly owned SKILL.md — written on every init.
+    agents.refresh(root)
     return InitResult(
         root=root,
         created=tuple(created),
         templates=tuple(copied),
         git_initialised=git_initialised,
         hooks_installed=hooks_installed,
+        agents_files=agents.AGENTS_FILES,
         notices=tuple(notices),
     )
 
@@ -2098,6 +2462,7 @@ def list_documents(
     stale: bool = False,
     deprecated_templates: bool = False,
     sort: str = "id",
+    include_body: bool = False,
 ) -> ListResult:
     """§13.10 ``list``: filtered tabular document listing.
 
@@ -2107,6 +2472,8 @@ def list_documents(
     outbound link that validate would report as ``W-LINK-OUTDATED``/
     ``W-LINK-STALE`` (spec §7.4, §14); ``--deprecated-templates`` selects
     documents pinned to a deprecated template version (spec §5.5).
+    ``include_body`` (``list --body``, AGENT_READINESS §6.3) fills each row's
+    ``body`` with the full Markdown text (AGENT-030).
     """
     report = compute_status(workspace)
     graph = workspace.graph
@@ -2133,7 +2500,8 @@ def list_documents(
 
     rows: list[ListRow] = []
     for doc_id in sorted(workspace.index.documents):
-        document = workspace.index.documents[doc_id].model
+        loaded = workspace.index.documents[doc_id]
+        document = loaded.model
         spec = workspace.config.types.get(document.type)
         kind = spec.kind if spec is not None else ""
         item = report.documents.get(doc_id)
@@ -2174,6 +2542,11 @@ def list_documents(
                 created=document.created,
                 tags=tuple(document.tags),
                 document=document,
+                body=(
+                    _body_text_or_none(workspace.root, loaded.body)
+                    if include_body
+                    else None
+                ),
             )
         )
 
@@ -2337,6 +2710,7 @@ class SyncResult:
 
     mode: Literal["bump", "report"]
     bumped: tuple[str, ...] = ()
+    initialised: tuple[str, ...] = ()
     changed: tuple[str, ...] = ()
     normalised: tuple[Path, ...] = ()
     rewritten: tuple[Path, ...] = ()
@@ -2345,6 +2719,8 @@ class SyncResult:
     stale: tuple[versioning.Freshness, ...] = ()
     pending: tuple[versioning.Freshness, ...] = ()
     findings: tuple[Finding, ...] = ()
+    agents_files_changed: tuple[Path, ...] = ()
+    notices: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -2363,6 +2739,7 @@ class CheckResult:
 
     blocked: bool
     would_bump: tuple[str, ...] = ()
+    initialised: tuple[str, ...] = ()
     findings: tuple[Finding, ...] = ()
     newly_outdated: tuple[versioning.Freshness, ...] = ()
     previously_outdated: tuple[versioning.Freshness, ...] = ()
@@ -2403,7 +2780,9 @@ class StatusResult:
     ``outdated``/``stale``/``pending`` are the §7.4 link buckets (supersession
     edges excluded from ``stale`` as in validation); ``cr_counts`` counts
     change requests by *effective* status (§9.3); ``wip`` carries the header
-    counts of §8.
+    counts of §8. ``pending_initial_version`` (AGENT_READINESS §3.3) lists the
+    uncommitted, modified ``v1`` documents that have inbound links — the
+    *pending initial version* note; no new status is invented for them.
     """
 
     wip: WipState
@@ -2416,6 +2795,7 @@ class StatusResult:
     deprecated_templates: tuple[DeprecatedTemplateUse, ...] = ()
     cr_pending: tuple[str, ...] = ()
     cr_drift: tuple[str, ...] = ()
+    pending_initial_version: tuple[str, ...] = ()
     hook_installed: bool = False
     hook_up_to_date: bool = False
     degraded: bool = False
@@ -2536,6 +2916,25 @@ def _item_bump(
         model.scope_hash = new_scope or model.scope_hash
 
 
+def _item_populate_grace(
+    item: _ReconcileItem,
+    new_hash: str,
+    new_assets: list[AssetRef] | None,
+    new_scope: str | None,
+) -> None:
+    """Populate the initial version in place (spec §3.3 rule 1, AGENT-011).
+
+    The recomputed ``body_hash`` (and ``assets``/``scope_hash``) are stored
+    while ``version`` stays ``1`` — the first commit is the first real version.
+    """
+    model = item.model
+    model.body_hash = new_hash
+    if isinstance(model, Document):
+        model.assets = list(new_assets or ())
+    elif not isinstance(model, Term):
+        model.scope_hash = new_scope or model.scope_hash
+
+
 def _fresh_entry(
     link: Link,
     target: Document,
@@ -2629,7 +3028,10 @@ def _freshness_report(
                         effective=after_version,
                     )
                 )
-            elif link.target in unbumped_ids and link.target_version == target.version:
+            elif link.target in unbumped_ids and link.target_version in (
+                target.version,
+                effective,
+            ):
                 pending.append(
                     _fresh_entry(
                         link,
@@ -2676,40 +3078,6 @@ def _working_tree_scope(workspace: Workspace) -> set[str]:
         if term_loaded.body in paths or term_loaded.sidecar in paths:
             scope.add(key)
     return scope
-
-
-def _ahead_false_positives(
-    workspace: Workspace, would_bump: Set[str]
-) -> set[tuple[str, str]]:
-    """``(source, target)`` pairs whose ``E-LINK-VERSION-AHEAD`` a bump resolves.
-
-    ``link refresh`` records the target's *effective* version (§7.4), so while
-    a target has unbumped modifications a refreshed link reads
-    ``target_version > target.version``; ``hook pre-commit`` bumps the target
-    first and never sees the finding. ``check`` suppresses those findings so
-    its exit code matches the hook's.
-    """
-    resolved: set[tuple[str, str]] = set()
-    index = workspace.index
-    for source, loaded in index.documents.items():
-        for link in loaded.model.links:
-            target_loaded = index.documents.get(link.target)
-            if target_loaded is None:
-                continue
-            if link.target in would_bump and (
-                link.target_version == target_loaded.model.version + 1
-            ):
-                resolved.add((source, link.target))
-    return resolved
-
-
-def _is_resolved_ahead(finding: Finding, resolved: Set[tuple[str, str]]) -> bool:
-    if finding.code != "E-LINK-VERSION-AHEAD":
-        return False
-    return any(
-        source == finding.subject and f"→ {target}" in finding.message
-        for source, target in resolved
-    )
 
 
 def _hook_decision(
@@ -2765,6 +3133,12 @@ def sync(workspace: Workspace, *, bump: bool = False) -> SyncResult:
     (or H1-synced title, §5.6) differs from the canonical form, and rebuilds
     the §16.5 index cache. Documents, change requests and glossary terms are
     all reconciled (the §7.5 hook scope).
+
+    Items in the initial-grace state (uncommitted ``v1``, §3.3) are
+    *initialised* instead of bumped in bump mode: the recomputed hashes are
+    stored in place and ``version`` stays ``1`` (AGENT-011). As its last step
+    the run refreshes the agent files (``AGENTS.md`` and the skill, §7.3,
+    AGENT-033); ``agents_files_changed`` lists the files it had to write.
     """
     root = workspace.root
     mode: Literal["bump", "report"] = (
@@ -2773,17 +3147,30 @@ def sync(workspace: Workspace, *, bump: bool = False) -> SyncResult:
     items = _scan_items(workspace)
     deltas = {item.key: _item_change(workspace, item) for item in items}
     changed = tuple(item.key for item in items if deltas[item.key][0])
-    bumped = changed if mode == "bump" else ()
+    grace_keys = {
+        item.key
+        for item in items
+        if deltas[item.key][0] and _item_in_grace(workspace, item.model, item.body_rel)
+    }
+    if mode == "bump":
+        initialised = tuple(key for key in changed if key in grace_keys)
+        bumped = tuple(key for key in changed if key not in grace_keys)
+    else:
+        initialised = ()
+        bumped = ()
     newly, previously, stale, pending = _freshness_report(
         workspace,
         bumped_ids=frozenset(bumped),
-        unbumped_ids=frozenset(changed) - frozenset(bumped),
+        unbumped_ids=(frozenset(changed) - frozenset(bumped)) - grace_keys,
     )
     for item in items:
         _item_title_sync(item)
         delta = deltas[item.key]
         if mode == "bump" and delta[0]:
-            _item_bump(item, delta[1], delta[2], delta[3])
+            if item.key in grace_keys:
+                _item_populate_grace(item, delta[1], delta[2], delta[3])
+            else:
+                _item_bump(item, delta[1], delta[2], delta[3])
     normalised: list[Path] = []
     rewritten: list[Path] = []
     for item in items:
@@ -2804,11 +3191,13 @@ def sync(workspace: Workspace, *, bump: bool = False) -> SyncResult:
             write_sidecar(abs_sidecar, item.model)
             rewritten.append(item.sidecar_rel)
     _rebuild_cache(workspace)
+    agents_changed = agents.refresh(root)
     workspace.reload()
     findings = tuple(validate_workspace(workspace))
     return SyncResult(
         mode=mode,
         bumped=bumped,
+        initialised=initialised,
         changed=changed,
         normalised=tuple(normalised),
         rewritten=tuple(rewritten),
@@ -2817,6 +3206,7 @@ def sync(workspace: Workspace, *, bump: bool = False) -> SyncResult:
         stale=tuple(stale),
         pending=tuple(pending),
         findings=findings,
+        agents_files_changed=agents_changed,
     )
 
 
@@ -2826,30 +3216,38 @@ def check(workspace: Workspace) -> CheckResult:
     Runs §7.5 in ``report`` mode over the documents/CRs/terms with staged,
     unstaged or untracked changes (never writes), computes the links the
     corresponding commit would newly outdate, and returns the hook's abort
-    decision. Findings that the commit's own bump would resolve
-    (``E-LINK-VERSION-AHEAD`` for links refreshed to an effective version,
-    §7.4) are suppressed so the exit code matches ``hook pre-commit``.
+    decision. Findings are ``validate_workspace`` unfiltered (§5.4, D-AGENT-7:
+    validation itself reports ``W-LINK-PENDING`` instead of
+    ``E-LINK-VERSION-AHEAD`` for links refreshed against an unbumped target,
+    so no suppression is needed and the exit code still matches
+    ``hook pre-commit``). Items in the initial-grace state (uncommitted
+    ``v1``, §3.3) are reported under ``initialised`` instead of
+    ``would_bump`` (AGENT-011) and are never pending-outdated targets
+    (§3.3 rule 4).
     """
     items = _scan_items(workspace)
     deltas = {item.key: _item_change(workspace, item) for item in items}
     changed = {item.key for item in items if deltas[item.key][0]}
-    would_bump = changed & _working_tree_scope(workspace)
+    grace_keys = {
+        item.key
+        for item in items
+        if deltas[item.key][0] and _item_in_grace(workspace, item.model, item.body_rel)
+    }
+    in_scope = changed & _working_tree_scope(workspace)
+    initialised = tuple(sorted(in_scope & grace_keys))
+    would_bump = in_scope - grace_keys
     newly, previously, stale, pending = _freshness_report(
         workspace,
         bumped_ids=frozenset(would_bump),
-        unbumped_ids=frozenset(changed - would_bump),
+        unbumped_ids=frozenset((changed - in_scope) - grace_keys),
     )
-    resolved = _ahead_false_positives(workspace, would_bump)
-    findings = [
-        finding
-        for finding in validate_workspace(workspace)
-        if not _is_resolved_ahead(finding, resolved)
-    ]
+    findings = tuple(validate_workspace(workspace))
     blocked, reasons = _hook_decision(workspace, findings, newly)
     return CheckResult(
         blocked=blocked,
         would_bump=tuple(sorted(would_bump)),
-        findings=tuple(findings),
+        initialised=initialised,
+        findings=findings,
         newly_outdated=tuple(newly),
         previously_outdated=tuple(previously),
         stale=tuple(stale),
@@ -2887,7 +3285,10 @@ def status(workspace: Workspace) -> StatusResult:
     Composes :func:`gregraph.core.status.compute_status` (the §8 model and WIP
     aggregate), the §7.4 link buckets, deprecated-template pins (§7.7), the
     change-request counts by effective status with pending decisions and drift
-    (§9.3, §9.6) and the §12.3 hook state. Never refuses.
+    (§9.3, §9.6) and the §12.3 hook state. Never refuses. Documents in the
+    initial-grace state (§3.3) show as ``draft``/untracked as today and are
+    additionally listed under the *pending initial version* note when they
+    have unbumped modifications and at least one inbound link.
     """
     report = compute_status(workspace)
     counts: dict[str, int] = {}
@@ -2895,6 +3296,18 @@ def status(workspace: Workspace) -> StatusResult:
         counts[item.status] = counts.get(item.status, 0) + 1
     items = _scan_items(workspace)
     changed = {item.key for item in items if _item_change(workspace, item)[0]}
+    # §3.3 (AGENT_READINESS): grace items whose initial version is still
+    # pending — uncommitted, modified v1 — and that other documents point at.
+    pending_initial: list[str] = []
+    for doc_id, doc_loaded in sorted(workspace.index.documents.items()):
+        if not _item_in_grace(workspace, doc_loaded.model, doc_loaded.body):
+            continue
+        if not _has_unbumped_modifications(
+            workspace, doc_loaded.model, doc_loaded.body
+        ):
+            continue
+        if workspace.graph.inbound_edges(doc_id):
+            pending_initial.append(doc_id)
     _newly, previously, stale, pending = _freshness_report(
         workspace,
         bumped_ids=frozenset(),
@@ -2939,6 +3352,7 @@ def status(workspace: Workspace) -> StatusResult:
         deprecated_templates=tuple(deprecated_templates),
         cr_pending=tuple(cr_pending),
         cr_drift=tuple(cr_drift),
+        pending_initial_version=tuple(pending_initial),
         hook_installed=hook_state.installed,
         hook_up_to_date=hook_state.up_to_date,
         degraded=not workspace.git.is_repo(),
@@ -3030,10 +3444,17 @@ def cr_new(
     title: str | None = None,
     scope: Sequence[str] = (),
     external_ref: str | None = None,
+    sections: Sequence[tuple[str, str]] = (),
+    strict: bool = False,
 ) -> Any:
-    """§13.18 ``cr new`` (§9.2, §9.4) — implemented in S13."""
+    """§13.18 ``cr new`` (§9.2, §9.4, §3.4) — implemented in S13."""
     return changes.new_change_request(
-        workspace, title=title, scope_specs=scope, external_ref=external_ref
+        workspace,
+        title=title,
+        scope_specs=scope,
+        external_ref=external_ref,
+        sections=sections,
+        strict=strict,
     )
 
 
@@ -3135,6 +3556,9 @@ class TermAddResult:
     template: TemplateRef
     findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
+    sections: tuple[TemplateSection, ...] = ()
+    body_text: str = ""
+    body_hash: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -3179,6 +3603,7 @@ class TermRenameResult:
     sidecar: Path
     mentions: tuple[TermMention, ...] = ()
     changed: bool = True
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -3189,6 +3614,7 @@ class TermDeprecateResult:
     slug: str
     changed: bool
     deprecated: Deprecation | None
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -3358,14 +3784,22 @@ def _move_file(source: Path, target: Path) -> None:
 
 
 def term_add(
-    workspace: Workspace, *, term: str, aliases: Sequence[str] = ()
+    workspace: Workspace,
+    *,
+    term: str,
+    aliases: Sequence[str] = (),
+    sections: Sequence[tuple[str, str]] = (),
+    strict: bool = False,
 ) -> TermAddResult:
-    """§13.20 ``term add`` (§10.2): create ``glossary/<slug>.md`` + ``<slug>.json``.
+    """§13.20 ``term add`` (§10.2, §3.4): create ``glossary/<slug>.md`` +
+    ``<slug>.json``.
 
     The slug is derived from the name (:func:`derive_term_slug`); the body is
     the repository's ``term`` template with the name as title (pinned in the
-    sidecar "for uniformity", §10.2). Refusals write nothing: slug collision
-    (``E-TERM-SLUG``, the §10.2 slug-uniqueness rule), alias clashes
+    sidecar "for uniformity", §10.2). ``sections`` assembles the body from
+    per-section input; ``strict`` requires every template-required section to
+    be filled at write time (§3.4 rules 5–6). Refusals write nothing: slug
+    collision (``E-TERM-SLUG``, the §10.2 slug-uniqueness rule), alias clashes
     (``E-TERM-ALIAS-CLASH``), missing template (``E-TEMPLATE-UNKNOWN``).
     Blank names/aliases raise ``ValueError`` (argument shape).
     """
@@ -3401,9 +3835,26 @@ def term_add(
     created = _now()
     identity = workspace.git.identity()
     author = identity.name if identity is not None else ""
-    body_text = render_template(
+    rendered = render_template(
         picked, title=name, slug=slug, created=_stamp(created), author=author
     )
+    if sections:
+        resolved_sections = resolve_section_inputs(picked.descriptor, sections)
+        rendered = assemble_sections(
+            picked.descriptor,
+            title=name,
+            content=resolved_sections,
+            base_body=rendered,
+            preserve_existing=False,
+        )
+        check_required_sections(
+            picked.descriptor,
+            rendered,
+            provided_headings=set(resolved_sections),
+            require_provided=True,
+        )
+    elif strict:
+        check_required_sections(picked.descriptor, rendered)
     abs_body, abs_sidecar = term_paths(workspace.root, slug)
     model = Term(
         schema=1,
@@ -3414,10 +3865,10 @@ def term_add(
         created_by=identity,
         template=TemplateRef(name=picked.name, version=picked.version),
         version=1,
-        body_hash=body_hash(body_text),
+        body_hash=body_hash(rendered),
         deprecated=None,
     )
-    write_body(abs_body, body_text)
+    write_body(abs_body, rendered)
     write_sidecar(abs_sidecar, model)
     workspace.reload()
     return TermAddResult(
@@ -3428,6 +3879,9 @@ def term_add(
         sidecar=abs_sidecar.relative_to(workspace.root),
         template=model.template,
         findings=_identity_findings(workspace, slug),
+        sections=tuple(picked.descriptor.sections),
+        body_text=rendered,
+        body_hash=model.body_hash,
     )
 
 
@@ -3614,6 +4068,7 @@ class TemplateAddResult:
     name: str
     version: int
     path: Path
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -3625,15 +4080,20 @@ class TemplateBumpResult:
     version: int
     path: Path
     breaking: bool
+    findings: tuple[Finding, ...] = ()
+    notices: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class TemplateShowResult:
-    """Result of :func:`template_show` (spec §13.17): descriptor + skeleton."""
+    """Result of :func:`template_show` (spec §13.17, §4.2): descriptor +
+    skeleton plus the repository-relative ``template.md`` path."""
 
     name: str
     descriptor: TemplateDescriptor
     skeleton: str
+    path: Path = Path()
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -3673,6 +4133,7 @@ class BaselineCreateResult:
     tag: str
     manifest: str
     head: str | None
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -3681,6 +4142,7 @@ class BaselineListResult:
     """Result of :func:`baseline_list` (spec §12.4): ``baseline/*`` tag names."""
 
     tags: tuple[str, ...] = ()
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -3701,6 +4163,7 @@ class RepairVersionsResult:
     """Result of :func:`repair_versions` (spec §13.19)."""
 
     repaired: tuple[RepairedSidecar, ...] = ()
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -3725,6 +4188,8 @@ class RepairIdResult:
     sidecar: Path
     rewritten: tuple[RewrittenLink, ...] = ()
     manual: tuple[str, ...] = ()
+    sidecar_document: Document | ChangeRequest | None = None
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -3735,6 +4200,8 @@ class RepairCacheResult:
     file_count: int
     types_seen: int
     templates_seen: int
+    findings: tuple[Finding, ...] = ()
+    notices: tuple[str, ...] = ()
 
 
 # --- template commands (spec §13.17) --------------------------------------
@@ -3948,6 +4415,7 @@ def template_show(
         name=name,
         descriptor=picked.descriptor,
         skeleton=picked.body,
+        path=TEMPLATES_RELPATH / name / f"v{picked.version}" / "template.md",
         notices=tuple(notices),
     )
 
@@ -4567,6 +5035,682 @@ def repair_cache(workspace: Workspace) -> RepairCacheResult:
     )
 
 
+# --- agent readiness: introspection, context, scaffolding (§4, §6, §7) -----
+#
+# ``describe_schema`` (§4.1), ``link_candidates`` (§4.3), ``build_context``
+# (§6.1), ``list --body`` (§6.3) and the agent scaffolding (§7) make the tool
+# agent-ready: one call answers "what are the rules" (AGENT-021), "what may I
+# link" (AGENT-023) and "what is the context" (AGENT-027) without reading
+# configuration files or source. ``core`` never prints; the CLI renders.
+
+_KIND_ORDER: Final[tuple[str, ...]] = (
+    "goal",
+    "requirement",
+    "design",
+    "verification",
+    "information",
+)
+
+#: §6.1 "Meaning / use when" per edge type, with the picker hints of the
+#: interactive link flow (the CLI's wording, restated here so ``core`` never
+#: imports ``cli``).
+_EDGE_DESCRIPTIONS: Final[dict[str, str]] = {
+    "refines": (
+        "Source states the same intent as target, more concretely (decomposition)."
+    ),
+    "derives-from": (
+        "Source is a new requirement caused by the target, not a decomposition of it."
+    ),
+    "depends-on": (
+        "Source cannot be implemented or is meaningless unless target is "
+        "realised (ordering, not decomposition)."
+    ),
+    "satisfies": "A design element realises a requirement.",
+    "verifies": ("A test or inspection provides evidence for a requirement or design."),
+    "constrains": (
+        "Source is a cross-cutting requirement that limits how target may be "
+        "realised; use instead of refines for quality attributes."
+    ),
+    "supersedes": "Source replaces target, which becomes superseded.",
+    "conflicts-with": (
+        "The two cannot both be satisfied as written; recorded until resolved."
+    ),
+    "relates-to": "Weak association with no other semantics (last resort).",
+}
+
+
+def _kind_tuple(kinds: Set[str]) -> tuple[str, ...]:
+    """§4.1 kind sets in the canonical §4.1 kind order."""
+    return tuple(kind for kind in _KIND_ORDER if kind in kinds)
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaTypeInfo:
+    """One configured type of ``describe_schema`` (AGENT_READINESS §4.1)."""
+
+    kind: str
+    folder: str
+    template: str
+    id_prefix: str
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaEdgeRule:
+    """One §6.1 edge-rule row of ``describe_schema`` (AGENT_READINESS §4.1)."""
+
+    type: str
+    direction: str
+    hierarchical: bool
+    acyclic: bool
+    source_kinds: tuple[str, ...]
+    target_kinds: tuple[str, ...]
+    same_kind_only: bool
+    mutually_exclusive_with: tuple[str, ...]
+    mutually_exclusive_opposite: tuple[str, ...]
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaTemplateInfo:
+    """One template of ``describe_schema``: the active version plus all
+    version numbers present (AGENT_READINESS §4.1)."""
+
+    latest_version: int
+    versions: tuple[int, ...]
+    deprecated: bool
+    breaking: bool
+    description: str
+    sections: tuple[TemplateSection, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaCrLifecycle:
+    """The CR state machine of ``describe_schema`` (AGENT_READINESS §4.1)."""
+
+    statuses: tuple[str, ...]
+    transitions: dict[str, tuple[str, ...]]
+    scope_intents: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaInfo:
+    """Result of :func:`describe_schema` — the repository rulebook (§4.1)."""
+
+    schema_: int
+    tool_version: str
+    id_prefix: str
+    baseline_branch: str
+    versioning: dict[str, Any]
+    graph: dict[str, Any]
+    assets: dict[str, Any]
+    cr: dict[str, Any]
+    types: dict[str, SchemaTypeInfo]
+    kinds: tuple[str, ...]
+    edge_rules: tuple[SchemaEdgeRule, ...]
+    templates: dict[str, SchemaTemplateInfo]
+    cr_lifecycle: SchemaCrLifecycle
+
+
+def describe_schema(workspace: Workspace, *, type: str | None = None) -> SchemaInfo:
+    """The repository rulebook for agents (AGENT_READINESS §4.1, AGENT-021).
+
+    ``--type`` filters ``types`` to that type and ``templates`` to the
+    templates its entries reference (plus the CR template while CRs are
+    enabled); unknown type names refuse ``E-TYPE-UNKNOWN``. ``edge_rules``,
+    ``kinds`` and ``cr_lifecycle`` are global and stay.
+    """
+    if type is not None and type not in workspace.config.types:
+        raise OperationRefused(
+            Finding(
+                code="E-TYPE-UNKNOWN",
+                severity="E",
+                subject=type,
+                message=f"unknown document type {type!r}",
+                fix="gregraph schema",
+            )
+        )
+    templates = load_template_dir(templates_dir(workspace.root))
+    active: dict[str, LoadedTemplate] = {}
+    for name, versions in templates.items():
+        live = [entry for entry in versions if not entry.descriptor.deprecated]
+        active[name] = live[-1] if live else versions[-1]
+    if type is not None:
+        wanted_types = {type}
+    else:
+        wanted_types = set(workspace.config.types)
+    config_types = workspace.config.types
+    types: dict[str, SchemaTypeInfo] = {}
+    for name in sorted(wanted_types):
+        spec = config_types[name]
+        chosen = active.get(spec.template)
+        types[name] = SchemaTypeInfo(
+            kind=spec.kind,
+            folder=spec.folder,
+            template=spec.template,
+            id_prefix=workspace.config.ids.prefix,
+            description=chosen.descriptor.description if chosen is not None else "",
+        )
+    if type is not None:
+        template_names = {spec.template for spec in types.values()}
+        if workspace.config.cr.enabled:
+            template_names.add(workspace.config.cr.template)
+    else:
+        template_names = set(active)
+    schema_templates: dict[str, SchemaTemplateInfo] = {}
+    for name in sorted(template_names):
+        chosen = active.get(name)
+        if chosen is None:
+            continue
+        schema_templates[name] = SchemaTemplateInfo(
+            latest_version=chosen.version,
+            versions=tuple(entry.version for entry in templates[name]),
+            deprecated=chosen.descriptor.deprecated,
+            breaking=chosen.descriptor.breaking,
+            description=chosen.descriptor.description,
+            sections=tuple(chosen.descriptor.sections),
+        )
+    exclusive_same: dict[str, set[str]] = {}
+    exclusive_opposite: dict[str, set[str]] = {}
+    for pair in (*MUTUALLY_EXCLUSIVE_SAME_PAIR, *MUTUALLY_EXCLUSIVE_OPPOSITE):
+        members = sorted(pair)
+        target_map = (
+            exclusive_same
+            if pair in MUTUALLY_EXCLUSIVE_SAME_PAIR
+            else exclusive_opposite
+        )
+        for member in members:
+            target_map.setdefault(member, set()).update(
+                other for other in members if other != member
+            )
+    edge_rules = tuple(
+        SchemaEdgeRule(
+            type=edge_type,
+            direction=rule.direction,
+            hierarchical=rule.hierarchical,
+            acyclic=rule.direction == "directed",
+            source_kinds=_kind_tuple(rule.source_kinds),
+            target_kinds=_kind_tuple(rule.target_kinds),
+            same_kind_only=rule.same_kind_only,
+            mutually_exclusive_with=tuple(sorted(exclusive_same.get(edge_type, ()))),
+            mutually_exclusive_opposite=tuple(
+                sorted(exclusive_opposite.get(edge_type, ()))
+            ),
+            description=_EDGE_DESCRIPTIONS.get(edge_type, ""),
+        )
+        for edge_type, rule in EDGE_RULES.items()
+    )
+    transitions: dict[str, tuple[str, ...]] = {
+        status: tuple(changes.ALLOWED_TRANSITIONS[status])
+        for status in changes.CR_STATUSES
+    }
+    return SchemaInfo(
+        schema_=workspace.config.gregraph.config_schema,
+        tool_version=__version__,
+        id_prefix=workspace.config.ids.prefix,
+        baseline_branch=workspace.config.git.baseline_branch,
+        versioning=dict(workspace.config.versioning.model_dump()),
+        graph=dict(workspace.config.graph.model_dump()),
+        assets=dict(workspace.config.assets.model_dump()),
+        cr=dict(workspace.config.cr.model_dump()),
+        types=types,
+        kinds=_KIND_ORDER,
+        edge_rules=edge_rules,
+        templates=schema_templates,
+        cr_lifecycle=SchemaCrLifecycle(
+            statuses=tuple(changes.CR_STATUSES),
+            transitions=transitions,
+            scope_intents=tuple(changes.SCOPE_INTENTS),
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class LinkCandidate:
+    """One admissible link target of :func:`link_candidates` (§4.3)."""
+
+    type: LinkType
+    target: str
+    target_title: str
+    target_type: str
+    target_kind: Kind | None
+
+
+@dataclass(frozen=True, slots=True)
+class LinkCandidatesResult:
+    """Result of :func:`link_candidates` (AGENT_READINESS §4.3, AGENT-023)."""
+
+    source: str
+    source_kind: Kind | None
+    allowed_edge_types: tuple[LinkType, ...]
+    candidates: tuple[LinkCandidate, ...]
+    findings: tuple[Finding, ...] = ()
+    notices: tuple[str, ...] = ()
+
+
+def link_candidates(
+    workspace: Workspace, *, source: str, edge_type: LinkType | None = None
+) -> LinkCandidatesResult:
+    """Admissible link targets for one source (AGENT_READINESS §4.3, AGENT-023).
+
+    The interactive picker's filtering, moved into core so the picker becomes
+    a caller: the §6.1 kind rule (unknown kinds skip the check, as in the
+    picker), target liveness (not deprecated, not superseded) and cycle
+    pre-exclusion via :meth:`gregraph.core.graph.Graph.check_link`. Unknown
+    edge types are usage errors (``ValueError``); an unknown source refuses
+    ``E-ID-UNKNOWN``. Candidates are sorted by ``(type, target)``.
+    """
+    if edge_type is not None and edge_type not in EDGE_RULES:
+        raise ValueError(f"unknown link type {edge_type!r}")
+    resolved = _resolve_doc_id(workspace, source)
+    graph = workspace.graph
+    source_kind = graph.kind_of(resolved)
+    allowed = tuple(
+        candidate
+        for candidate, rule in EDGE_RULES.items()
+        if source_kind is None or source_kind in rule.source_kinds
+    )
+    index = workspace.index
+    wanted_types: tuple[LinkType, ...] = (
+        (edge_type,) if edge_type is not None else allowed
+    )
+    candidates: list[LinkCandidate] = []
+    for candidate_type in wanted_types:
+        if candidate_type not in allowed:
+            continue
+        for target_id in sorted(index.documents):
+            target_loaded = index.documents[target_id]
+            target_kind = graph.kind_of(target_id)
+            if (
+                source_kind is not None
+                and target_kind is not None
+                and not edge_kind_allowed(candidate_type, source_kind, target_kind)
+            ):
+                continue
+            if target_loaded.model.deprecated is not None or graph.is_superseded(
+                target_id
+            ):
+                continue
+            check = graph.check_link(resolved, candidate_type, target_id)
+            if (
+                check.outcome == "refused"
+                and check.refusal is not None
+                and check.refusal.code == "E-CYCLE"
+            ):
+                continue
+            candidates.append(
+                LinkCandidate(
+                    type=candidate_type,
+                    target=target_id,
+                    target_title=target_loaded.model.title,
+                    target_type=target_loaded.model.type,
+                    target_kind=target_kind,
+                )
+            )
+    candidates.sort(key=lambda item: (item.type, item.target))
+    return LinkCandidatesResult(
+        source=resolved,
+        source_kind=source_kind,
+        allowed_edge_types=allowed,
+        candidates=tuple(candidates),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ContextEdge:
+    """The edge connecting a neighbour to the bundle (AGENT_READINESS §6.1)."""
+
+    source: str
+    type: str
+    target: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContextTarget:
+    """One requested bundle entry: the ``show`` payload plus parsed sections."""
+
+    show: ShowResult
+    sections: tuple[Section, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ContextNeighbor:
+    """One BFS neighbour of the bundle (AGENT_READINESS §6.1, AGENT-027)."""
+
+    id: str
+    via: ContextEdge
+    direction: Literal["upstream", "downstream"]
+    depth: int
+    freshness: str
+    sidecar: Document
+    body: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContextTerm:
+    """One glossary term matched in a bundle body (AGENT_READINESS §6.1)."""
+
+    term: str
+    slug: str
+    aliases: tuple[str, ...]
+    body: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContextResult:
+    """Result of :func:`build_context` (AGENT_READINESS §6.1)."""
+
+    requested: tuple[str, ...]
+    depth: int
+    direction: Literal["both", "upstream", "downstream"]
+    targets: tuple[ContextTarget, ...]
+    neighbors: tuple[ContextNeighbor, ...]
+    terms: tuple[ContextTerm, ...]
+    findings: tuple[Finding, ...] = ()
+
+
+def _finding_covers_edge(
+    finding: Finding, source: str, edge_type: str, target: str
+) -> bool:
+    """Whether ``finding`` already reports the given edge (§6.1)."""
+    return str(finding.subject) == source and (
+        f"link {edge_type} → {target}" in finding.message
+    )
+
+
+def build_context(
+    workspace: Workspace,
+    *,
+    ids: Sequence[str],
+    depth: int = 1,
+    direction: Literal["both", "upstream", "downstream"] = "both",
+    include_terms: bool = True,
+) -> ContextResult:
+    """One-call context bundle (AGENT_READINESS §6.1, AGENT-027, D-AGENT-8).
+
+    ``targets`` re-use the ``show`` payload per requested ID (documents and
+    CRs) plus the parsed sections; ``neighbors`` is a BFS over graph edges up
+    to ``depth`` filtered by ``direction`` — a CR's neighbours are its scope
+    targets and impact set as downstream edges with a synthetic ``scope`` edge
+    — each carrying the connecting edge, its direction, the BFS depth and the
+    §7.4 freshness state of that edge. ``terms`` lists every glossary term (or
+    alias) occurring in a bundle body (§10.2 word-boundary matching).
+    ``findings`` collects the ``validate`` findings whose subject is a bundle
+    ID plus the freshness findings of all non-fresh edges among bundle
+    documents, de-duplicated by ``(code, subject, message)``.
+    """
+    if depth < 0:
+        raise ValueError("depth must be >= 0")
+    if direction not in ("both", "upstream", "downstream"):
+        raise ValueError(
+            f"invalid direction {direction!r}: use both|upstream|downstream"
+        )
+    if not ids:
+        raise ValueError("build_context needs at least one document or CR id")
+    known = set(workspace.index.documents) | set(workspace.index.changes)
+    requested: list[str] = []
+    for raw in ids:
+        resolved = normalise_id(raw, workspace.config.ids.prefix, known=known)
+        if resolved is None:
+            raise OperationRefused(
+                Finding(
+                    code="E-ID-UNKNOWN",
+                    severity="E",
+                    subject=raw,
+                    message=f"no document or change request with id {raw!r}",
+                    fix="gregraph list",
+                )
+            )
+        if resolved not in requested:
+            requested.append(resolved)
+
+    freshness = _link_freshness(workspace)
+    state_by_key = {entry.key: entry.state for entry in freshness.entries}
+    graph = workspace.graph
+
+    targets: list[ContextTarget] = []
+    for target_id in requested:
+        show = show_document(workspace, target_id, body=True)
+        if show.change_request is not None:
+            body_text = show.change_request.body
+        else:
+            body_text = show.body_text or ""
+        targets.append(
+            ContextTarget(show=show, sections=tuple(parse_sections(body_text)))
+        )
+
+    visited: set[str] = set(requested)
+    neighbors: list[ContextNeighbor] = []
+    frontier: list[str] = list(requested)
+    for current_depth in range(1, depth + 1):
+        next_frontier: list[str] = []
+        for node_id in frontier:
+            candidates: list[
+                tuple[str, ContextEdge, Literal["upstream", "downstream"]]
+            ] = []
+            if node_id in workspace.index.changes:
+                if direction in ("both", "downstream"):
+                    cr_show = changes.show_change(workspace, node_id)
+                    seen: set[str] = set()
+                    for neighbour_id in (
+                        *(row.id for row in cr_show.scope),
+                        *cr_show.impact,
+                    ):
+                        if neighbour_id in seen:
+                            continue
+                        seen.add(neighbour_id)
+                        candidates.append(
+                            (
+                                neighbour_id,
+                                ContextEdge(
+                                    source=node_id, type="scope", target=neighbour_id
+                                ),
+                                "downstream",
+                            )
+                        )
+            elif node_id in workspace.index.documents:
+                if direction in ("both", "downstream"):
+                    for edge in graph.outbound_edges(node_id):
+                        candidates.append(
+                            (
+                                edge.target,
+                                ContextEdge(
+                                    source=edge.source,
+                                    type=edge.type,
+                                    target=edge.target,
+                                ),
+                                "downstream",
+                            )
+                        )
+                if direction in ("both", "upstream"):
+                    for edge in graph.inbound_edges(node_id):
+                        if edge.source != node_id:
+                            candidates.append(
+                                (
+                                    edge.source,
+                                    ContextEdge(
+                                        source=edge.source,
+                                        type=edge.type,
+                                        target=edge.target,
+                                    ),
+                                    "upstream",
+                                )
+                            )
+            for neighbour_id, via, edge_direction in candidates:
+                if neighbour_id in visited or neighbour_id not in graph.nodes:
+                    continue
+                if neighbour_id not in workspace.index.documents:
+                    continue
+                visited.add(neighbour_id)
+                next_frontier.append(neighbour_id)
+                loaded = workspace.index.documents[neighbour_id]
+                neighbors.append(
+                    ContextNeighbor(
+                        id=neighbour_id,
+                        via=via,
+                        direction=edge_direction,
+                        depth=current_depth,
+                        freshness=state_by_key.get(
+                            (via.source, via.type, via.target), "fresh"
+                        ),
+                        sidecar=loaded.model,
+                        body=_body_text_or_none(workspace.root, loaded.body) or "",
+                    )
+                )
+        frontier = next_frontier
+
+    terms: list[ContextTerm] = []
+    if include_terms:
+        bundle_bodies = [
+            *(target.show.body_text or "" for target in targets),
+            *(neighbour.body for neighbour in neighbors),
+        ]
+        for slug in sorted(workspace.index.terms):
+            term_loaded = workspace.index.terms[slug]
+            model = term_loaded.model
+            names = (model.term, *model.aliases)
+            if any(_matched_names(text, names) for text in bundle_bodies):
+                terms.append(
+                    ContextTerm(
+                        term=model.term,
+                        slug=model.slug,
+                        aliases=tuple(model.aliases),
+                        body=_body_text_or_none(workspace.root, term_loaded.body) or "",
+                    )
+                )
+
+    bundle_ids = set(requested) | {neighbour.id for neighbour in neighbors}
+    findings: list[Finding] = [
+        finding
+        for finding in validate_workspace(workspace)
+        if str(finding.subject) in bundle_ids
+    ]
+    for entry in freshness.entries:
+        if entry.state == "fresh" or entry.type == "supersedes":
+            continue
+        if entry.source not in bundle_ids or entry.target not in bundle_ids:
+            continue
+        if any(
+            _finding_covers_edge(finding, entry.source, entry.type, entry.target)
+            for finding in findings
+        ):
+            continue
+        if entry.state == "stale":
+            if graph.is_superseded(entry.target):
+                findings.append(
+                    Finding(
+                        code="W-LINK-STALE",
+                        severity="W",
+                        subject=entry.source,
+                        message=(
+                            f"link {entry.type} → {entry.target}: target is superseded"
+                        ),
+                        fix=(
+                            f"gregraph link refresh {entry.source} {entry.target} "
+                            "--follow"
+                        ),
+                    )
+                )
+            else:
+                findings.append(
+                    Finding(
+                        code="W-LINK-STALE",
+                        severity="W",
+                        subject=entry.source,
+                        message=(
+                            f"link {entry.type} → {entry.target}: target is deprecated"
+                        ),
+                        fix=(
+                            f"gregraph unlink {entry.source} {entry.type} "
+                            f"{entry.target}"
+                        ),
+                    )
+                )
+        elif entry.state == "outdated" and not (
+            entry.link_target_version > entry.effective
+        ):
+            findings.append(
+                Finding(
+                    code="W-LINK-OUTDATED",
+                    severity="W",
+                    subject=entry.source,
+                    message=(
+                        f"link {entry.type} → {entry.target}: target_version "
+                        f"{entry.link_target_version} is below the target's "
+                        f"version {entry.target_version}"
+                    ),
+                    fix=f"gregraph link refresh {entry.source} {entry.target}",
+                )
+            )
+        elif entry.state == "pending-outdated":
+            if (
+                entry.link_target_version == entry.effective
+                and entry.effective > entry.target_version
+            ):
+                findings.append(
+                    Finding(
+                        code="W-LINK-PENDING",
+                        severity="W",
+                        subject=entry.source,
+                        message=(
+                            f"link {entry.type} → {entry.target}: target_version "
+                            f"{entry.link_target_version} matches target's "
+                            "pending version; target has unbumped modifications"
+                        ),
+                        fix="gregraph sync --bump",
+                    )
+                )
+            else:
+                findings.append(
+                    Finding(
+                        code="W-LINK-PENDING",
+                        severity="W",
+                        subject=entry.source,
+                        message=(
+                            f"link {entry.type} → {entry.target}: target has "
+                            "unbumped modifications; the link will become "
+                            "outdated on the next commit"
+                        ),
+                        fix=f"gregraph link refresh {entry.source} {entry.target}",
+                    )
+                )
+    deduped: dict[tuple[str, str, str], Finding] = {}
+    for finding in findings:
+        key = (finding.code, str(finding.subject), finding.message)
+        deduped.setdefault(key, finding)
+    return ContextResult(
+        requested=tuple(requested),
+        depth=depth,
+        direction=direction,
+        targets=tuple(targets),
+        neighbors=tuple(neighbors),
+        terms=tuple(terms),
+        findings=tuple(deduped.values()),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RepairAgentsResult:
+    """Result of :func:`repair_agents` (AGENT_READINESS §7.3, AGENT-033)."""
+
+    agents_files: tuple[Path, ...]
+    changed: tuple[Path, ...]
+    findings: tuple[Finding, ...] = ()
+    notices: tuple[str, ...] = ()
+
+
+def repair_agents(workspace: Workspace) -> RepairAgentsResult:
+    """Regenerate ``AGENTS.md`` and ``SKILL.md`` (AGENT_READINESS §7.3).
+
+    The managed block is replaced in place and ``SKILL.md`` is rewritten when
+    its content differs; only changed files are written. Refuses nothing
+    except a missing repository (the caller's exit-3 concern).
+    """
+    return RepairAgentsResult(
+        agents_files=agents.AGENTS_FILES, changed=agents.refresh(workspace.root)
+    )
+
+
 # --- hooks (spec §12.3, §13.22) -------------------------------------------
 #
 # ``hooks install/uninstall/status`` wrap :mod:`gregraph.core.hooks` and
@@ -4598,6 +5742,7 @@ class HookPreCommitResult:
     """
 
     bumped: tuple[str, ...] = ()
+    initialised: tuple[str, ...] = ()
     newly_outdated: tuple[versioning.Freshness, ...] = ()
     previously_outdated: tuple[versioning.Freshness, ...] = ()
     stale: tuple[versioning.Freshness, ...] = ()
@@ -4724,14 +5869,22 @@ def _hook_assets(
 
 def _hook_bump(
     workspace: Workspace, documents: set[str], change_ids: set[str], terms: set[str]
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """Bump every scoped entity whose committed content changed (spec §7.5).
 
-    Sidecars are rewritten in canonical form and staged so they travel with
-    the commit (§7.5 step 2). Entities whose sidecars cannot be parsed are
-    skipped — validation reports the error and the hook blocks on it.
+    Returns ``(bumped, initialised)``. Entities in the initial-grace state —
+    ``version == 1`` and absent from Git ``HEAD`` (§3.3, AGENT-011) — are
+    *populated* instead: ``version`` stays ``1``, the recomputed hashes are
+    stored in place, and the ID lands in ``initialised``. Everything else is
+    bumped by exactly one version. Sidecars are rewritten in canonical form
+    and staged so they travel with the commit (§7.5 step 2). Entities whose
+    sidecars cannot be parsed are skipped — validation reports the error and
+    the hook blocks on it. Degraded mode never reaches this pass
+    (``hook_pre_commit`` refuses without Git), so the grace predicate's
+    ``is_repo()`` check is satisfied by construction.
     """
     bumped: list[str] = []
+    initialised: list[str] = []
     root = workspace.root
     for doc_id in sorted(documents):
         doc_loaded = workspace.index.documents.get(doc_id)
@@ -4752,6 +5905,15 @@ def _hook_bump(
         stored_assets = sorted((asset.path, asset.hash) for asset in sidecar.assets)
         current_assets = sorted((asset.path, asset.hash) for asset in new_assets)
         if new_hash == sidecar.body_hash and stored_assets == current_assets:
+            continue
+        if sidecar.version == 1 and (
+            workspace.git.file_at("HEAD", doc_loaded.body) is None
+        ):
+            sidecar.body_hash = new_hash
+            sidecar.assets = new_assets
+            write_sidecar(root / doc_loaded.sidecar, sidecar)
+            workspace.git.stage([doc_loaded.sidecar])
+            initialised.append(sidecar.id)
             continue
         sidecar.version += 1
         sidecar.body_hash = new_hash
@@ -4777,6 +5939,15 @@ def _hook_bump(
             request.title = title
         if new_hash == request.body_hash and new_scope_hash == request.scope_hash:
             continue
+        if request.version == 1 and (
+            workspace.git.file_at("HEAD", cr_loaded.body) is None
+        ):
+            request.body_hash = new_hash
+            request.scope_hash = new_scope_hash
+            write_sidecar(root / cr_loaded.sidecar, request)
+            workspace.git.stage([cr_loaded.sidecar])
+            initialised.append(request.id)
+            continue
         request.version += 1
         request.body_hash = new_hash
         request.scope_hash = new_scope_hash
@@ -4797,12 +5968,20 @@ def _hook_bump(
         new_hash = body_hash(text)
         if new_hash == term.body_hash:
             continue
+        if term.version == 1 and (
+            workspace.git.file_at("HEAD", term_loaded.body) is None
+        ):
+            term.body_hash = new_hash
+            write_sidecar(root / term_loaded.sidecar, term)
+            workspace.git.stage([term_loaded.sidecar])
+            initialised.append(term.slug)
+            continue
         term.version += 1
         term.body_hash = new_hash
         write_sidecar(root / term_loaded.sidecar, term)
         workspace.git.stage([term_loaded.sidecar])
         bumped.append(term.slug)
-    return bumped
+    return bumped, initialised
 
 
 def _hook_head_version(
@@ -4850,8 +6029,8 @@ def hook_pre_commit(workspace: Workspace) -> HookPreCommitResult:
             notices=("not a git repository — nothing to reconcile",)
         )
     documents, change_ids, terms = _hook_staged_scope(workspace)
-    bumped = _hook_bump(workspace, documents, change_ids, terms)
-    if bumped:
+    bumped, initialised = _hook_bump(workspace, documents, change_ids, terms)
+    if bumped or initialised:
         workspace.reload()
     after = _link_freshness(workspace)
     head_versions: dict[str, int] = {}
@@ -4886,6 +6065,7 @@ def hook_pre_commit(workspace: Workspace) -> HookPreCommitResult:
         reasons.append("change request modified after its last decision")
     return HookPreCommitResult(
         bumped=tuple(bumped),
+        initialised=tuple(initialised),
         newly_outdated=tuple(newly),
         previously_outdated=tuple(previous),
         stale=tuple(after.stale),

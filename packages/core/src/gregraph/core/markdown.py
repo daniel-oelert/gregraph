@@ -6,28 +6,54 @@ Pure functions, no I/O. Bodies are parsed in their normalised form
 to the canonical body.
 
 ID pattern: ``<PREFIX>-<6 chars Crockford base32>`` (spec §4.1). Matching is
-case-insensitive on input and normalised to uppercase (spec §4.5). The
-canonical pattern lives in ``core/ids.py``.
+case-insensitive on input and normalised to uppercase (spec §4.5); prose
+mention matching is explicit-syntax only and case-sensitive (spec §5.2,
+D-AGENT-6). The canonical pattern lives in ``core/ids.py``.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
 from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
+from markdown_it.token import Token
 from mdit_py_plugins.tasklists import tasklists_plugin
 
 from gregraph.core.hashing import normalise_body
 from gregraph.core.ids import ID_PATTERN
 
-_ID_RE = re.compile(
-    rf"(?<![A-Za-z0-9])({ID_PATTERN.pattern})(?![A-Za-z0-9])",
-    re.IGNORECASE | re.ASCII,
+MentionVia = Literal["wikilink", "link"]
+
+# ``[[ID]]`` / ``[[ID|label]]`` — label may hold any non-``]`` text, no newline,
+# and must not be empty (spec §5.2). Case-sensitive: canonical uppercase only.
+_WIKILINK_CORE = rf"({ID_PATTERN.pattern})(\|[^\]\n]+)?"
+_WIKILINK_RE = re.compile(rf"\[\[{_WIKILINK_CORE}\]\]")
+# Link-text form of a wikilink: ``[[ID]](x)`` reaches the walker as a link
+# whose text token holds the inner ``[ID]`` brackets (markdown-it nests them).
+_WIKILINK_TEXT_RE = re.compile(rf"\[{_WIKILINK_CORE}\]")
+_HTML_TAG_RE = re.compile(r"</?([A-Za-z][A-Za-z0-9]*)[^>]*>")
+_HTML_VOID_ELEMENTS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
 )
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
@@ -42,10 +68,10 @@ class Section:
 
 @dataclass(frozen=True)
 class Mention:
-    """An ID mention found in a body (spec §5.2). Raw match, unfiltered."""
+    """An explicit ID mention found in a body (spec §5.2). Raw match, unfiltered."""
 
     id: str
-    via: Literal["bare", "link"]
+    via: MentionVia
 
 
 @dataclass(frozen=True)
@@ -239,34 +265,123 @@ def find_asset_refs(
     return refs
 
 
-def find_mentions(body: str | bytes, *, doc_path: Path) -> list[Mention]:
-    """Return raw ID mentions from bare text and link targets (spec §5.2).
+def _html_tag_state(content: str, in_html: bool) -> bool:
+    """Return the inline-HTML open state after one ``html_inline`` token.
 
-    Unique ``(id, via)`` matches in first-seen order, IDs uppercased. Bare IDs
-    in code spans, fenced code, and HTML are not mentions. Image references
-    are asset references, never mentions. Targets landing in ``assets/`` are
-    asset references, not mention sources. The caller filters CR IDs and
-    existence (W-MENTION-UNLINKED, E-MENTION-UNKNOWN).
+    Opening tags switch the state on (except void and self-closing tags),
+    closing tags switch it off; comments and other raw HTML leave it as it
+    is. Text between inline tags is inside HTML for mention purposes
+    (spec §5.2, D-AGENT-6).
+    """
+    if content.startswith("<!--"):
+        return in_html
+    match = _HTML_TAG_RE.fullmatch(content)
+    if match is None:
+        return in_html
+    if content.startswith("</"):
+        return False
+    if content.rstrip().endswith("/>"):
+        return in_html
+    if match.group(1).lower() in _HTML_VOID_ELEMENTS:
+        return in_html
+    return True
+
+
+def _mentions_from_link(
+    children: Sequence[Token],
+    start: int,
+    doc_path: Path,
+    record: Callable[[str, MentionVia], None],
+) -> int:
+    """Record mentions from one Markdown link, returning the next child index.
+
+    The target rules run first and an asset target never counts (spec §5.2):
+    a trimmed target matching the ID pattern, or a relative target resolving
+    to a ``.md`` path whose stem matches the ID pattern. Then the link text:
+    a bracket-wrapped ``[ID]``/``[ID|label]`` is the ``[[ID]](x)`` wikilink
+    form, a whole-text ID is an ordinary link mention, and ``[[ID]]`` inside
+    longer link text is a wikilink in its own right.
+    """
+    href_attr = children[start].attrGet("href")
+    href = href_attr if isinstance(href_attr, str) else ""
+    resolved = _resolve_target(href, doc_path)
+    is_asset = _asset_owner(resolved) is not None
+    if not is_asset:
+        target = href.strip()
+        if ID_PATTERN.fullmatch(target):
+            record(target, "link")
+        elif (
+            resolved is not None
+            and resolved.name.endswith(".md")
+            and ID_PATTERN.fullmatch(resolved.stem)
+        ):
+            record(resolved.stem, "link")
+    end = start + 1
+    while end < len(children) and children[end].type != "link_close":
+        end += 1
+    link_text = "".join(
+        child.content for child in children[start + 1 : end] if child.type == "text"
+    )
+    inner = link_text.strip()
+    wrapped = _WIKILINK_TEXT_RE.fullmatch(inner)
+    if wrapped is not None:
+        record(wrapped.group(1), "wikilink")
+    elif not is_asset and ID_PATTERN.fullmatch(inner):
+        record(inner, "link")
+    for child in children[start + 1 : end]:
+        if child.type == "text":
+            for match in _WIKILINK_RE.finditer(child.content):
+                record(match.group(1), "wikilink")
+    return end + 1
+
+
+def find_mentions(body: str | bytes, *, doc_path: Path) -> list[Mention]:
+    """Return explicit ID mentions from wikilinks and links (spec §5.2, D-AGENT-6).
+
+    A mention is recognised only in explicit reference syntax, and only for
+    canonical uppercase IDs (case-sensitive matching of ``ID_PATTERN``):
+
+    - the wikilink ``[[ID]]`` or ``[[ID|label]]``;
+    - a Markdown link ``[text](target)`` whose trimmed target matches the ID
+      pattern, whose relative target resolves against ``doc_path`` to a
+      ``.md`` path with an ID stem, or whose trimmed link text matches the ID
+      pattern.
+
+    ``[[ID]](x)`` is the wikilink (markdown-it nests the inner brackets into
+    the link text token); the target ``x`` is not a mention. Bare ID-shaped
+    tokens in prose and headings are not mentions. Code spans, fenced code,
+    and HTML are excluded by the token walk; image references are asset
+    references, and targets landing in ``assets/`` are asset references,
+    never mention sources. Unique ``(id, via)`` matches in first-seen order.
+    The caller filters CR IDs and existence (W-MENTION-UNLINKED,
+    E-MENTION-UNKNOWN).
     """
     text = normalise_body(body)
-    seen: dict[tuple[str, str], Mention] = {}
+    seen: dict[tuple[str, MentionVia], Mention] = {}
+
+    def record(mention_id: str, via: MentionVia) -> None:
+        seen.setdefault((mention_id, via), Mention(id=mention_id, via=via))
+
     for token in _parser().parse(text):
-        if token.type != "inline" or not token.children:
+        children = token.children
+        if token.type != "inline" or children is None:
             continue
-        for child in token.children:
-            via: Literal["bare", "link"] | None = None
-            source = ""
-            if child.type == "text":
-                via = "bare"
-                source = child.content
-            elif child.type == "link_open":
-                href = child.attrGet("href")
-                source = href if isinstance(href, str) else ""
-                if source and _asset_owner(_resolve_target(source, doc_path)) is None:
-                    via = "link"
-            if via is None:
+        index = 0
+        in_html = False
+        while index < len(children):
+            child = children[index]
+            if child.type == "html_inline":
+                in_html = _html_tag_state(child.content, in_html)
+                index += 1
                 continue
-            for match in _ID_RE.finditer(source):
-                mention = Mention(id=match.group(1).upper(), via=via)
-                seen.setdefault((mention.id, mention.via), mention)
+            if in_html:
+                index += 1
+                continue
+            if child.type == "link_open":
+                index = _mentions_from_link(children, index, doc_path, record)
+                continue
+            if child.type == "text":
+                for match in _WIKILINK_RE.finditer(child.content):
+                    record(match.group(1), "wikilink")
+            index += 1
     return list(seen.values())

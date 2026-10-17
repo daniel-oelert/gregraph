@@ -76,12 +76,16 @@ def _content_hashes(
 
 
 def effective_version(target: Document | ChangeRequest) -> int:
-    """Return the effective version of a target (spec §7.4).
+    """Return the effective version of a target (spec §7.4, §3.3 rule 3).
 
     ``target.version + 1`` when the target currently has unbumped content
     modifications (the recomputed body hash or asset hashes differ from the
-    stored values), otherwise ``target.version``.
+    stored values), otherwise ``target.version``.  A target in the
+    *initial-grace state* (uncommitted ``v1``, AGENT-012) stays effectively
+    at ``1`` even while it is being populated.
     """
+    if _in_initial_grace(target):
+        return 1
     if _has_unbumped_changes(target):
         return target.version + 1
     return target.version
@@ -102,10 +106,23 @@ def _has_unbumped_changes(target: Document | ChangeRequest) -> bool:
     return False
 
 
+def _in_initial_grace(target: Any) -> bool:
+    """Whether ``target`` is in the initial-grace state (spec §3.3, AGENT-012).
+
+    Callers that know the Git state pass an ``in_grace`` mapping instead; this
+    predicate only sees the pre-computed flag the workspace layer may set.
+    """
+    return (
+        bool(getattr(target, "_in_grace", False))
+        and getattr(target, "version", None) == 1
+    )
+
+
 class UnbumpedMixin:
     """Mixin that records whether a loaded item has unbumped modifications."""
 
     _unbumped: bool = False
+    _in_grace: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -168,8 +185,9 @@ def freshness_table(
     deprecated_or_superseded: Mapping[str, bool] | None = None,
     unbumped: Mapping[str, bool] | None = None,
     bumped_ids: Iterable[str] = (),
+    in_grace: Mapping[str, bool] | None = None,
 ) -> FreshnessTable:
-    """Classify every link using effective versions (spec §7.4, §7.5).
+    """Classify every link using effective versions (spec §7.4, §7.5, §3.3).
 
     ``links`` yields ``(source_id, link, target_model_or_None)`` triples.
     ``deprecated_or_superseded`` maps target id → True when the target is
@@ -177,9 +195,14 @@ def freshness_table(
     the target currently has unbumped modifications.  ``bumped_ids`` are the
     targets whose version was just incremented by reconcile — links into them
     that became outdated are *newly* outdated (D2 refinement 2).
+    ``in_grace`` maps target id → True when the target is in the
+    initial-grace state (uncommitted ``v1``, §3.3): such a target is never
+    unbumped-pending, its effective version stays ``1``, and a link recorded
+    at ``target_version == 1`` stays fresh across the initial commit.
     """
     dep = deprecated_or_superseded or {}
     unb = unbumped or {}
+    grace = in_grace or {}
     bumped = set(bumped_ids)
     entries: list[Freshness] = []
     for source, link, target in links:
@@ -187,17 +210,26 @@ def freshness_table(
             continue
         is_stale = dep.get(link.target, False)
         is_unbumped = unb.get(link.target, False)
-        eff = target.version + 1 if is_unbumped else target.version
+        in_target_grace = (
+            grace.get(link.target, False) or _in_initial_grace(target)
+        ) and target.version == 1
+        if in_target_grace:
+            # §3.3 rules 3–4: populating a draft is not a pending state.
+            is_unbumped = False
+            eff = target.version
+        else:
+            eff = target.version + 1 if is_unbumped else target.version
         if is_stale:
             state: Literal["fresh", "outdated", "stale", "pending-outdated"] = "stale"
-        elif link.target_version > target.version:
-            state = "outdated"  # E-LINK-VERSION-AHEAD territory; still "outdated"
+        elif link.target_version > eff:
+            state = "outdated"  # E-LINK-VERSION-AHEAD territory (§5.4)
         elif link.target_version < eff:
             if link.target_version < target.version:
                 state = "outdated"
             else:
                 state = "pending-outdated"
         elif is_unbumped:
+            # tv == eff on an unbumped target (§5.4/D-AGENT-7): pending
             state = "pending-outdated"
         else:
             state = "fresh"
@@ -223,9 +255,10 @@ def freshness_table(
 
 @dataclass(frozen=True)
 class ReconcileReport:
-    """Result of :func:`reconcile` (spec §7.5 step 5)."""
+    """Result of :func:`reconcile` (spec §7.5 step 5, §3.3 rule 2)."""
 
     bumped: list[str] = field(default_factory=list)
+    initialised: list[str] = field(default_factory=list)
     newly_outdated: list[Freshness] = field(default_factory=list)
     previously_outdated: list[Freshness] = field(default_factory=list)
     stale: list[Freshness] = field(default_factory=list)
@@ -239,14 +272,20 @@ def reconcile(
     mode: Mode,
     deprecated_or_superseded: Mapping[str, bool] | None = None,
     links: Iterable[tuple[str, Link, Document | ChangeRequest | None]] | None = None,
+    in_grace: Mapping[str, bool] | None = None,
 ) -> ReconcileReport:
-    """Normalise, hash and optionally bump every item in scope (spec §7.5).
+    """Normalise, hash and optionally bump every item in scope (spec §7.5, §3.3).
 
     ``items`` is a sequence of ``(sidecar, raw_body)`` pairs.  In ``bump`` mode
     a content change increments ``version`` by exactly 1 and rewrites the
     sidecar; ``report`` mode never writes.  Change detection is hash-based.
+    ``in_grace`` maps item id → True for items in the initial-grace state
+    (uncommitted ``v1``, §3.3): their effective change *populates the initial
+    version* — ``version`` stays 1, the recomputed hashes are updated in place
+    and the item lands in ``initialised`` (AGENT-011), never ``bumped``.
     """
     bumped: list[str] = []
+    initialised: list[str] = []
     unbumped: dict[str, bool] = {}
     findings: list[Finding] = []
 
@@ -271,17 +310,31 @@ def reconcile(
                 sidecar.scope_hash = new_scope_hash
 
         if changed:
-            unbumped[item_id] = True
-            if mode == "bump":
-                sidecar.version += 1
-                sidecar.body_hash = new_hash
-                if isinstance(sidecar, Document):
-                    sidecar.assets = _recompute_assets(sidecar, body)
-                # Placeholder for callers that hold the body path.
-                # Writing is done by the caller (storage needs the path).
-                bumped.append(item_id)
-                unbumped[item_id] = False
-                _stage_marker(sidecar)
+            item_in_grace = (
+                (in_grace or {}).get(item_id, False) or _in_initial_grace(sidecar)
+            ) and sidecar.version == 1
+            if item_in_grace:
+                # §3.3 rule 1 / AGENT-011: populate the initial version in
+                # place; the CR scope hash was refreshed above.
+                initialised.append(item_id)
+                if mode == "bump":
+                    sidecar.body_hash = new_hash
+                    if isinstance(sidecar, Document):
+                        sidecar.assets = _recompute_assets(sidecar, body)
+                    unbumped[item_id] = False
+                    _stage_marker(sidecar)
+            else:
+                unbumped[item_id] = True
+                if mode == "bump":
+                    sidecar.version += 1
+                    sidecar.body_hash = new_hash
+                    if isinstance(sidecar, Document):
+                        sidecar.assets = _recompute_assets(sidecar, body)
+                    # Placeholder for callers that hold the body path.
+                    # Writing is done by the caller (storage needs the path).
+                    bumped.append(item_id)
+                    unbumped[item_id] = False
+                    _stage_marker(sidecar)
         else:
             unbumped[item_id] = False
 
@@ -292,10 +345,12 @@ def reconcile(
             deprecated_or_superseded=deprecated_or_superseded,
             unbumped=unbumped,
             bumped_ids=bumped,
+            in_grace=in_grace,
         )
 
     return ReconcileReport(
         bumped=bumped,
+        initialised=initialised,
         newly_outdated=table.newly_outdated,
         previously_outdated=table.previously_outdated,
         stale=table.stale,

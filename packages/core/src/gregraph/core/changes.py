@@ -26,7 +26,7 @@ import datetime as dt
 import re
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal, cast
 from uuid import UUID
@@ -54,6 +54,7 @@ from gregraph.core.models import (
     ScopeEntry,
     ScopeIntent,
     TemplateRef,
+    TemplateSection,
 )
 from gregraph.core.status import compute_status
 from gregraph.core.storage import (
@@ -66,8 +67,11 @@ from gregraph.core.storage import (
 )
 from gregraph.core.templates import (
     LoadedTemplate,
+    assemble_sections,
+    check_required_sections,
     load_template_dir,
     render_template,
+    resolve_section_inputs,
     resolve_template,
 )
 from gregraph.core.versioning import scope_hash as reconcile_scope_hash
@@ -82,6 +86,7 @@ __all__ = [
     "CrNewResult",
     "CrReanalyzeResult",
     "CrScopeResult",
+    "CrScopeUpdate",
     "CrSetResult",
     "CrShowResult",
     "DriftEntry",
@@ -287,8 +292,28 @@ def _document_unbumped(workspace: Workspace, document: Document, body: Path) -> 
     )
 
 
+def _doc_in_grace(workspace: Workspace, doc_id: str) -> bool:
+    """Initial-grace state of a document (§3.3, AGENT-012).
+
+    True while a ``v1`` document is absent from Git ``HEAD`` — untracked or
+    staged-but-uncommitted: reconcile populates it in place and its effective
+    version stays ``1`` (D-AGENT-3). Degraded mode has no commit step and
+    therefore no grace period (AGENT-014).
+    """
+    if not workspace.git.is_repo():
+        return False
+    loaded = workspace.index.documents.get(doc_id)
+    if loaded is None or loaded.model.version != 1:
+        return False
+    if not (workspace.root / loaded.body).is_file():
+        return False
+    return workspace.git.file_at("HEAD", loaded.body) is None
+
+
 def document_effective_version(workspace: Workspace, doc_id: str) -> int:
-    """Working-tree effective version of a document (spec §7.4)."""
+    """Working-tree effective version of a document (spec §7.4, §3.3 rule 3)."""
+    if _doc_in_grace(workspace, doc_id):
+        return 1
     loaded = workspace.index.documents[doc_id]
     unbumped = _document_unbumped(workspace, loaded.model, loaded.body)
     return loaded.model.version + 1 if unbumped else loaded.model.version
@@ -324,11 +349,33 @@ def content_changed(cr: ChangeRequest, body: str | bytes) -> bool:
     return content_hashes(cr, body) != (cr.body_hash, cr.scope_hash)
 
 
-def effective_version_from(cr: ChangeRequest, body: str | bytes | None) -> int:
+def _cr_in_grace(workspace: Workspace, cr: ChangeRequest, cr_id: str) -> bool:
+    """Initial-grace state of a change request (§3.3 edge cases, AGENT-012).
+
+    Same predicate as :func:`_doc_in_grace`: a ``v1`` CR whose body is absent
+    from Git ``HEAD`` is being populated. Degraded mode has no grace period.
+    """
+    if not workspace.git.is_repo() or cr.version != 1:
+        return False
+    abs_body, _sidecar = change_paths(workspace.root, cr_id)
+    rel_body = abs_body.relative_to(workspace.root)
+    if not abs_body.is_file():
+        return False
+    return workspace.git.file_at("HEAD", rel_body) is None
+
+
+def effective_version_from(
+    cr: ChangeRequest, body: str | bytes | None, *, in_grace: bool = False
+) -> int:
     """CR effective version (§7.4 rule): ``version + 1`` when content is pending.
 
-    A missing body counts as modified, mirroring the document rule.
+    A missing body counts as modified, mirroring the document rule. A CR in
+    the initial-grace state (uncommitted ``v1``, §3.3) stays at ``1`` while it
+    is being populated; a missing body is not a grace case
+    (``E-BODY-MISSING``, not a grace state).
     """
+    if in_grace and cr.version == 1 and body is not None:
+        return 1
     if body is None:
         return cr.version + 1
     return cr.version + 1 if content_changed(cr, body) else cr.version
@@ -337,7 +384,9 @@ def effective_version_from(cr: ChangeRequest, body: str | bytes | None) -> int:
 def effective_cr_version(workspace: Workspace, cr_id: str) -> int:
     """Working-tree effective version of a CR (spec §7.4, §9.3 ``at_version``)."""
     cr = _read_cr(workspace, cr_id)
-    return effective_version_from(cr, cr_body(workspace, cr_id))
+    return effective_version_from(
+        cr, cr_body(workspace, cr_id), in_grace=_cr_in_grace(workspace, cr, cr_id)
+    )
 
 
 def _record_content_change(
@@ -1041,7 +1090,9 @@ def cr_findings(
         body = cr_body(workspace, cr_id)
         for code, subject, message, fix in _body_issues(cr, body, templates):
             issues.append(CrIssue(code=code, subject=subject, message=message, fix=fix))
-        effective = effective_version_from(cr, body)
+        effective = effective_version_from(
+            cr, body, in_grace=_cr_in_grace(workspace, cr, cr_id)
+        )
         for problem in status_issues(cr):
             issues.append(
                 CrIssue(
@@ -1135,7 +1186,9 @@ def _mention_issues(
 
     Unknown IDs are ``E-MENTION-UNKNOWN``; a mentioned document in neither the
     scope nor ``introduces`` is ``W-CR-MENTION-UNSCOPED``. Mentions of other
-    CRs are not checked.
+    CRs are not checked. Only explicit mention syntax counts (``[[ID]]`` or
+    Markdown links, spec §5.2 D-AGENT-6) — bare ID-shaped prose is not a
+    mention.
     """
     documents = workspace.index.documents
     changes = workspace.index.changes
@@ -1200,6 +1253,9 @@ class CrNewResult:
     external_ref: str | None
     findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
+    sections: tuple[TemplateSection, ...] = ()
+    body_text: str = ""
+    sidecar_model: ChangeRequest | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1210,7 +1266,20 @@ class CrScopeResult:
     scope: tuple[ScopeEntry, ...]
     version: int
     changed: bool
+    added: ScopeEntry | None = None
+    removed: str | None = None
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CrScopeUpdate:
+    """One base-version change recorded by :func:`reanalyze` (§2.4.4)."""
+
+    id: str
+    intent: ScopeIntent
+    old_base_version: int
+    new_base_version: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -1225,6 +1294,8 @@ class CrSetResult:
     extra: dict[str, str]
     decision: Decision | None
     changed: bool
+    applied: dict[str, Any] = field(default_factory=dict)
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -1236,6 +1307,7 @@ class CrDecisionResult:
     status: CrStatus
     decision: Decision | None
     changed: bool
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -1247,6 +1319,8 @@ class CrReanalyzeResult:
     scope: tuple[ScopeEntry, ...]
     version: int
     changed: bool
+    updated: tuple[CrScopeUpdate, ...] = ()
+    findings: tuple[Finding, ...] = ()
     notices: tuple[str, ...] = ()
 
 
@@ -1306,6 +1380,7 @@ class CrShowResult:
     external_ref: str | None
     tags: tuple[str, ...]
     extra: dict[str, str]
+    body: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1359,12 +1434,17 @@ def new_change_request(
     title: str | None,
     scope_specs: Sequence[str] = (),
     external_ref: str | None = None,
+    sections: Sequence[tuple[str, str]] = (),
+    strict: bool = False,
 ) -> CrNewResult:
-    """Create a change request (spec §13.18 ``cr new``, §9.2).
+    """Create a change request (spec §13.18 ``cr new``, §9.2, §3.4).
 
     Renders the ``cr.template`` body, records the initial ``open`` decision
     with ``at_version = 1`` and the given scope entries with their baseline
-    base versions (§9.4). Refusals write nothing.
+    base versions (§9.4). ``sections`` assembles the body from per-section
+    input in template order; ``strict`` requires every template-required
+    section to be filled at write time (§3.4 rules 5–6). Refusals write
+    nothing.
     """
     require_enabled(workspace, subject="cr new")
     if title is None or not title.strip():
@@ -1384,6 +1464,23 @@ def new_change_request(
         created=_stamp(created),
         author=author,
     )
+    if sections:
+        resolved_sections = resolve_section_inputs(picked.descriptor, sections)
+        body_text = assemble_sections(
+            picked.descriptor,
+            title=title,
+            content=resolved_sections,
+            base_body=body_text,
+            preserve_existing=False,
+        )
+        check_required_sections(
+            picked.descriptor,
+            body_text,
+            provided_headings=set(resolved_sections),
+            require_provided=True,
+        )
+    elif strict:
+        check_required_sections(picked.descriptor, body_text)
     baseline = BaselineView(workspace.git, workspace.config.git.baseline_branch)
     entries: list[ScopeEntry] = []
     for raw_target, intent in parsed:
@@ -1439,6 +1536,9 @@ def new_change_request(
         scope=tuple(cr.scope),
         external_ref=external_ref,
         findings=_identity_findings(workspace, generated.id),
+        sections=tuple(picked.descriptor.sections),
+        body_text=body_text,
+        sidecar_model=cr,
     )
 
 
@@ -1476,6 +1576,7 @@ def scope_add(
         scope=tuple(cr.scope),
         version=cr.version,
         changed=True,
+        added=entry,
     )
 
 
@@ -1497,6 +1598,7 @@ def scope_remove(workspace: Workspace, *, cr_id: str, target: str) -> CrScopeRes
             scope=tuple(cr.scope),
             version=cr.version,
             changed=False,
+            removed=resolved,
             notices=(f"{resolved} is not in the scope of {resolved_cr}",),
         )
     cr.scope = sorted(remaining, key=lambda item: item.id)
@@ -1508,6 +1610,7 @@ def scope_remove(workspace: Workspace, *, cr_id: str, target: str) -> CrScopeRes
         scope=tuple(cr.scope),
         version=cr.version,
         changed=True,
+        removed=resolved,
     )
 
 
@@ -1621,8 +1724,24 @@ def set_cr_fields(
             new_status,
             at=_now(),
             by=workspace.git.identity(),
-            at_version=effective_version_from(cr, cr_body(workspace, resolved_cr)),
+            at_version=effective_version_from(
+                cr,
+                cr_body(workspace, resolved_cr),
+                in_grace=_cr_in_grace(workspace, cr, resolved_cr),
+            ),
         )
+    applied: dict[str, Any] = {}
+    for key, _op, _value in plans:
+        if key == "status":
+            applied["status"] = cr.status
+        elif key == "branch":
+            applied["branch"] = cr.branch
+        elif key == "external_ref":
+            applied["external_ref"] = cr.external_ref
+        elif key == "tags":
+            applied["tags"] = list(cr.tags)
+        else:
+            applied[key] = cr.extra.get(key[len("extra.") :])
     changed = cr.model_dump(mode="json") != before
     if changed:
         _write_cr(workspace, cr)
@@ -1636,6 +1755,7 @@ def set_cr_fields(
         extra=dict(cr.extra),
         decision=decision,
         changed=changed,
+        applied=applied,
         notices=tuple(notices),
     )
 
@@ -1661,7 +1781,11 @@ def reaffirm_cr(workspace: Workspace, *, cr_id: str) -> CrDecisionResult:
         cr,
         at=_now(),
         by=workspace.git.identity(),
-        at_version=effective_version_from(cr, cr_body(workspace, resolved_cr)),
+        at_version=effective_version_from(
+            cr,
+            cr_body(workspace, resolved_cr),
+            in_grace=_cr_in_grace(workspace, cr, resolved_cr),
+        ),
     )
     _write_cr(workspace, cr)
     workspace.reload()
@@ -1703,6 +1827,7 @@ def reanalyze(
     notices: list[str] = []
     changed_ids: list[str] = []
     updated: list[ScopeEntry] = []
+    updates: list[CrScopeUpdate] = []
     for entry in cr.scope:
         if entry.id not in selected:
             updated.append(entry)
@@ -1728,6 +1853,14 @@ def reanalyze(
         if current == entry.base_version:
             updated.append(entry)
             continue
+        updates.append(
+            CrScopeUpdate(
+                id=entry.id,
+                intent=entry.intent,
+                old_base_version=entry.base_version,
+                new_base_version=current,
+            )
+        )
         updated.append(
             ScopeEntry(id=entry.id, intent=entry.intent, base_version=current)
         )
@@ -1743,6 +1876,7 @@ def reanalyze(
         scope=tuple(cr.scope),
         version=cr.version,
         changed=changed,
+        updated=tuple(updates),
         notices=tuple(notices),
     )
 
@@ -1843,6 +1977,7 @@ def show_change(workspace: Workspace, cr_id: str) -> CrShowResult:
         external_ref=cr.external_ref,
         tags=tuple(cr.tags),
         extra=dict(cr.extra),
+        body=cr_body(workspace, resolved_cr) or "",
     )
 
 

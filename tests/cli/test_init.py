@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from gregraph.cli.main import main
 from gregraph.core.config import Config, read_config
 from gregraph.core.hashing import body_hash
@@ -235,3 +237,73 @@ def test_m1_init_then_new_writes_valid_pair(tmp_path: Path, capsys) -> None:
     workspace = Workspace.open(target)
     findings = validate_workspace(workspace)
     assert not [item for item in findings if item.code in STRUCTURAL_CODES]
+
+
+# --------------------------------------------------------------------------
+# agent instruction files (AGENT_READINESS §7.1, AGENT-031)
+# --------------------------------------------------------------------------
+
+
+def test_init_writes_agents_md_and_skill(tmp_path: Path) -> None:
+    target = tmp_path / "repo"
+    assert main(["init", str(target), "--no-git"]) == 0
+    agents = target / "AGENTS.md"
+    skill = target / ".agents" / "skills" / "gregraph" / "SKILL.md"
+    assert agents.is_file()
+    assert skill.is_file()
+    text = agents.read_text(encoding="utf-8")
+    assert "<!-- >>> gregraph agent instructions >>> -->" in text
+    assert "<!-- <<< gregraph agent instructions <<< -->" in text
+    assert "never hand-edit" in text
+    skill_text = skill.read_text(encoding="utf-8")
+    assert skill_text.startswith("---\n")
+    assert "name: gregraph" in skill_text
+    assert "description:" in skill_text
+
+
+def test_init_human_output_reports_agents_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "repo"
+    assert main(["init", str(target), "--no-git"]) == 0
+    out = capsys.readouterr().out
+    assert "agents files written: AGENTS.md, .agents/skills/gregraph/SKILL.md" in out
+
+
+def test_init_json_payload_lists_agents_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "repo"
+    assert main(["init", str(target), "--no-git", "--json"]) == 0
+    out = capsys.readouterr()
+    payload = json.loads(out.out)
+    assert set(payload) == {
+        "root",
+        "created",
+        "templates",
+        "git_initialised",
+        "hooks_installed",
+        "agents_files",
+        "findings",
+        "notices",
+    }
+    assert payload["agents_files"] == [
+        "AGENTS.md",
+        ".agents/skills/gregraph/SKILL.md",
+    ]
+    assert payload["root"] == str(target)
+    assert payload["git_initialised"] is False
+    assert (target / "AGENTS.md").is_file()
+    assert (target / ".agents" / "skills" / "gregraph" / "SKILL.md").is_file()
+
+
+def test_init_preserves_existing_agents_md_content(tmp_path: Path) -> None:
+    """AGENT-031: pre-existing ``AGENTS.md`` content is preserved and the
+    managed block is appended."""
+    target = tmp_path / "repo"
+    target.mkdir()
+    (target / "AGENTS.md").write_text("# My project notes\n", encoding="utf-8")
+    assert main(["init", str(target), "--no-git"]) == 0
+    text = (target / "AGENTS.md").read_text(encoding="utf-8")
+    assert text.startswith("# My project notes\n")
+    assert text.count("<!-- >>> gregraph agent instructions >>> -->") == 1

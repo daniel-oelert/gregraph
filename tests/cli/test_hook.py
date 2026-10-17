@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib.util
+import json
 import subprocess
 from pathlib import Path
 from uuid import uuid4
@@ -25,6 +26,7 @@ from gregraph.core.config import Config, GraphSection, VersioningSection, write_
 from gregraph.core.hashing import asset_hash, body_hash
 from gregraph.core.ids import derive_id
 from gregraph.core.models import AssetRef, Document, Link, TemplateRef
+from gregraph.core.operations import create_document
 from gregraph.core.storage import (
     assets_dir,
     config_path,
@@ -35,6 +37,7 @@ from gregraph.core.storage import (
     write_sidecar,
 )
 from gregraph.core.templates import LoadedTemplate, load_template_dir
+from gregraph.core.workspace import Workspace
 
 
 def install_templates(root: Path) -> None:
@@ -649,3 +652,107 @@ def test_degraded_sync_bumps(tmp_repo: Path) -> None:
     assert main(["--repo", str(tmp_repo), "sync"]) == 0
     sidecar = read_sidecar(doc_sidecar(tmp_repo, doc_id), Document)
     assert sidecar.version == 2
+
+
+# --------------------------------------------------------------------------
+# --json payload (AGENT_READINESS §2.4.3) and the v1 grace period (§3.3)
+# --------------------------------------------------------------------------
+
+
+def test_hook_pre_commit_json_payload_shape(hook_repo: Path, capsys) -> None:
+    """§2.4.3: the payload is result-shaped (R5) with every documented key."""
+    capsys.readouterr()
+    exit_code = main(["--repo", str(hook_repo), "hook", "pre-commit", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {
+        "blocked",
+        "block_reasons",
+        "bumped",
+        "initialised",
+        "newly_outdated",
+        "previously_outdated",
+        "stale",
+        "pending",
+        "findings",
+        "refresh_commands",
+        "notices",
+    }
+    assert payload["blocked"] is False
+    assert payload["bumped"] == []
+    assert payload["initialised"] == []
+    assert isinstance(payload["notices"], list)
+
+
+def test_hook_pre_commit_json_initialises_uncommitted_v1(
+    hook_repo: Path, capsys
+) -> None:
+    """AGENT-401: an uncommitted ``v1`` is populated in place — ``version``
+    stays 1, the hook reports ``initialised`` (not ``bumped``)."""
+    workspace = Workspace.open(hook_repo)
+    fresh = create_document(workspace, type="user-story", title="Fresh story")
+    body = doc_body(hook_repo, fresh.id)
+    body.write_text(
+        filled_body(hook_repo, "user-story", "Fresh story"), encoding="utf-8"
+    )
+    git(hook_repo, "add", "-A")
+    capsys.readouterr()
+    exit_code = main(["--repo", str(hook_repo), "hook", "pre-commit", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert payload["initialised"] == [fresh.id]
+    assert payload["bumped"] == []
+    document = read_sidecar(doc_sidecar(hook_repo, fresh.id), Document)
+    assert document.version == 1
+    assert document.body_hash == body_hash(body.read_text(encoding="utf-8"))
+
+
+def test_hook_pre_commit_json_bumps_after_the_initial_commit(
+    hook_repo: Path, capsys
+) -> None:
+    """AGENT-013: once the document is in ``HEAD``, a further edit bumps."""
+    workspace = Workspace.open(hook_repo)
+    fresh = create_document(workspace, type="user-story", title="Fresh story")
+    body = doc_body(hook_repo, fresh.id)
+    body.write_text(
+        filled_body(hook_repo, "user-story", "Fresh story"), encoding="utf-8"
+    )
+    git(hook_repo, "add", "-A")
+    assert main(["--repo", str(hook_repo), "hook", "pre-commit", "--json"]) == 0
+    capsys.readouterr()
+    git(hook_repo, "commit", "-m", "populate v1")
+    body.write_text(
+        filled_body(hook_repo, "user-story", "Fresh story") + "\nMore prose.\n",
+        encoding="utf-8",
+    )
+    git(hook_repo, "add", "-A")
+    exit_code = main(["--repo", str(hook_repo), "hook", "pre-commit", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert payload["bumped"] == [fresh.id]
+    assert payload["initialised"] == []
+    document = read_sidecar(doc_sidecar(hook_repo, fresh.id), Document)
+    assert document.version == 2
+
+
+def test_hook_pre_commit_json_blocks_with_reasons(hook_repo: Path, capsys) -> None:
+    """Exit 1 stays result-shaped (R5): the document carries the decision."""
+    workspace = Workspace.open(hook_repo)
+    fresh = create_document(workspace, type="user-story", title="Blocking story")
+    doc_body(hook_repo, fresh.id).write_text("{not json", encoding="utf-8")
+    git(hook_repo, "add", "-A")
+    capsys.readouterr()
+    exit_code = main(["--repo", str(hook_repo), "hook", "pre-commit", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(out.out)
+    assert payload["blocked"] is True
+    assert payload["block_reasons"]
+    # The grace population still happens (v1 populated in place) while the
+    # validation error blocks the commit — the two reports are independent.
+    assert payload["initialised"] == [fresh.id]
+    assert any(f["code"] == "E-TITLE-MISSING" for f in payload["findings"])
+    assert out.err == ""  # stderr stays empty under --json

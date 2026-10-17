@@ -188,3 +188,45 @@ def test_list_empty_filters_yield_empty_table(
     assert main(["--repo", str(sample_graph.root), "list", "--status", "nope"]) == 0
     out = capsys.readouterr().out
     assert sample_graph.ids["goal"] not in out
+
+
+# --------------------------------------------------------------------------
+# list --body (AGENT_READINESS §6.3, AGENT-030)
+# --------------------------------------------------------------------------
+
+
+def test_list_body_includes_markdown_in_json_items(
+    sample_graph: SampleGraph,
+) -> None:
+    rows = list_json(sample_graph.root, "--body")
+    by_id = {row["id"]: row for row in rows}
+    story = by_id[sample_graph.ids["story"]]
+    assert (
+        story["body"]
+        == "# Upload from the desktop\n\nSample body for Upload from the desktop.\n"
+    )
+
+
+def test_list_without_body_flag_has_no_body_key(
+    sample_graph: SampleGraph,
+) -> None:
+    rows = list_json(sample_graph.root)
+    assert all("body" not in row for row in rows)
+
+
+def test_list_body_ignored_in_human_table(sample_graph: SampleGraph, capsys) -> None:
+    root = sample_graph.root
+    assert main(["--repo", str(root), "list", "--body"]) == 0
+    out = capsys.readouterr().out
+    assert "Sample body" not in out
+    assert "Upload from the desktop" in out
+
+
+def test_list_body_filters_still_apply(sample_graph: SampleGraph) -> None:
+    rows = list_json(sample_graph.root, "--body", "--type", "user-story")
+    assert {row["id"] for row in rows} == {
+        sample_graph.ids["story"],
+        sample_graph.ids["story_old"],
+        sample_graph.ids["scan_story"],
+    }
+    assert all(row["body"] for row in rows)

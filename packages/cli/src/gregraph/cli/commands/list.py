@@ -1,8 +1,10 @@
-"""``gregraph list`` (spec §13.10): tabular document listing.
+"""``gregraph list`` (spec §13.10, AGENT_READINESS §6.3): tabular listing.
 
 Columns ID, type, status, version, title; ``--json`` emits the sidecars plus
-derived fields. Thin: parse → :func:`gregraph.core.operations.list_documents`
-→ format (tables/JSON in :mod:`gregraph.cli.output`).
+derived fields; ``--body`` adds the full Markdown text to each ``--json``
+item (the human table is unchanged). Thin: parse →
+:func:`gregraph.core.operations.list_documents` → format (tables/JSON in
+:mod:`gregraph.cli.output`).
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from gregraph.core.operations import list_documents
 
 def run(args: argparse.Namespace, app: App) -> int:
     workspace = app.open_workspace()
+    include_body = bool(getattr(args, "body", False))
     result = list_documents(
         workspace,
         type_names=args.type,
@@ -28,14 +31,17 @@ def run(args: argparse.Namespace, app: App) -> int:
         stale=args.stale,
         deprecated_templates=args.deprecated_templates,
         sort=args.sort,
+        include_body=include_body,
     )
     if app.out.json_mode:
-        app.out.json(
-            [
-                document_payload(row.document, status=row.status, kind=row.kind)
-                for row in result.rows
-            ]
-        )
+        rows = [
+            document_payload(row.document, status=row.status, kind=row.kind)
+            for row in result.rows
+        ]
+        if include_body:
+            for row, payload in zip(result.rows, rows, strict=True):
+                payload["body"] = row.body
+        app.out.json(rows)
         return 0
     app.out.table(
         ["ID", "TYPE", "STATUS", "VERSION", "TITLE"],

@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
 
+from gregraph.core import agents
 from gregraph.core.git import GitAdapter
 from gregraph.core.hashing import body_hash
 from gregraph.core.ids import is_derivable_from
@@ -34,17 +36,33 @@ from gregraph.core.models import (
     TemplateRef,
 )
 from gregraph.core.operations import (
+    _effective_version,
+    body_state,
+    build_context,
+    check,
     cr_new,
     create_document,
     deprecate,
+    describe_schema,
+    hook_pre_commit,
+    init_repository,
     link,
+    link_candidates,
     link_refresh,
+    list_documents,
     record_introduction,
+    repair_agents,
     set_fields,
     supersede,
     supersession_chain,
+    sync,
+    template_sections,
+    template_show,
+    term_add,
     undeprecate,
     unlink,
+    update_body,
+    update_sections,
 )
 from gregraph.core.storage import read_sidecar, write_body, write_sidecar
 from gregraph.core.versioning import scope_hash
@@ -59,6 +77,28 @@ CREATED = dt.datetime(2026, 9, 10, 14, 2, 11, tzinfo=dt.UTC)
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
+
+
+def _run_git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=t@example.org", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+
+
+def commit_tree(root: Path, message: str = "initial") -> None:
+    """Commit the whole tree when ``root`` is a Git repository (no-op otherwise).
+
+    Git-mode fixtures rely on this before effective-version assertions: an
+    uncommitted ``v1`` document is in the initial-grace state (§3.3) whose
+    effective version stays ``1``.
+    """
+    if not (root / ".git").exists():
+        return
+    _run_git(root, "add", "-A")
+    _run_git(root, "commit", "--allow-empty", "-m", message)
 
 
 def add_template(
@@ -254,6 +294,7 @@ def test_create_document_effective_target_version(tmp_repo: Path) -> None:
     add_template(tmp_repo, "goal")
     ws = Workspace.open(tmp_repo)
     goal = create_document(ws, type="goal", title="Goal")
+    commit_tree(tmp_repo)
     body = tmp_repo / goal.body
     write_body(body, body.read_text(encoding="utf-8") + "\nEdited.\n")
     story = create_document(
@@ -335,6 +376,7 @@ def test_create_document_identity_filled(tmp_repo: Path, identity: GitIdentity) 
 
 def test_link_records_effective_version(sample_graph: SampleGraph) -> None:
     root = sample_graph.root
+    commit_tree(root)
     ws = Workspace.open(root)
     feature = sample_graph.ids["feature"]
     orphan = sample_graph.ids["orphan"]
@@ -476,6 +518,7 @@ def test_unlink_broken_edge(sample_graph: SampleGraph) -> None:
 
 def test_link_refresh_to_updates_inbound(sample_graph: SampleGraph) -> None:
     root = sample_graph.root
+    commit_tree(root)
     feature = sample_graph.ids["feature"]
     body = root / "documents" / "feature" / f"{feature}.md"
     write_body(body, body.read_text(encoding="utf-8") + "\nEdited.\n")
@@ -496,6 +539,7 @@ def test_link_refresh_to_updates_inbound(sample_graph: SampleGraph) -> None:
 
 def test_link_refresh_from_and_all_and_dry_run(sample_graph: SampleGraph) -> None:
     root = sample_graph.root
+    commit_tree(root)
     feature = sample_graph.ids["feature"]
     story = sample_graph.ids["story"]
     body = root / "documents" / "feature" / f"{feature}.md"
@@ -1039,6 +1083,7 @@ def test_effective_version_accounts_for_assets(tmp_repo: Path) -> None:
     add_template(tmp_repo, "user-story")
     ws = Workspace.open(tmp_repo)
     goal = create_document(ws, type="goal", title="Goal")
+    commit_tree(tmp_repo)
     asset_dir = tmp_repo / "assets" / goal.id
     asset_dir.mkdir(parents=True)
     (asset_dir / "pic.png").write_bytes(b"png")
@@ -1099,3 +1144,835 @@ def test_set_tag_removal_absent_notice(sample_graph: SampleGraph) -> None:
     result = set_fields(ws, doc_id=orphan, assignments=["tags-=ghost"])
     assert result.notices and "not present" in result.notices[0]
     assert not result.changed
+
+
+# --------------------------------------------------------------------------
+# v1 grace period (AGENT_READINESS §3.3, AGENT-011…AGENT-014)
+# --------------------------------------------------------------------------
+
+
+def test_v1_grace_effective_version_stays_one(tmp_repo: Path) -> None:
+    """An uncommitted ``v1`` document is populated in place (effective 1)."""
+    if not (tmp_repo / ".git").exists():
+        pytest.skip("grace period requires a git-initialised tmp_repo (§3.3)")
+    add_template(tmp_repo, "user-story")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    goal = create_document(ws, type="user-story", title="Draft")
+    body = tmp_repo / goal.body
+    write_body(body, body.read_text(encoding="utf-8") + "\nFilled in.\n")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    assert _effective_version(ws, goal.id) == 1
+    # the grace state also feeds links: target_version stays 1
+    story = create_document(ws, type="user-story", title="Other")
+    result = link(ws, source=story.id, link_type="relates-to", target=goal.id)
+    assert result.link is not None and result.link.target_version == 1
+
+
+def test_v1_grace_degraded_mode_bumps_normally(tmp_repo: Path) -> None:
+    """Degraded mode has no grace period: sync bumps the edited v1 to 2."""
+    if (tmp_repo / ".git").exists():
+        pytest.skip("degraded-mode behaviour requires the no-git tmp_repo")
+    add_template(tmp_repo, "user-story")
+    ws = Workspace.open(tmp_repo)
+    goal = create_document(ws, type="user-story", title="Draft")
+    body = tmp_repo / goal.body
+    write_body(body, body.read_text(encoding="utf-8") + "\nFilled in.\n")
+    ws = Workspace.open(tmp_repo)
+    assert _effective_version(ws, goal.id) == 2
+    result = sync(ws, bump=True)
+    assert result.initialised == ()
+    assert result.bumped == (goal.id,)
+    assert read_sidecar(tmp_repo / goal.sidecar, Document).version == 2
+
+
+def test_sync_bump_initialises_uncommitted_v1(tmp_repo: Path) -> None:
+    """``sync --bump`` populates the initial version in place (AGENT-011)."""
+    if not (tmp_repo / ".git").exists():
+        pytest.skip("grace period requires a git-initialised tmp_repo (§3.3)")
+    add_template(tmp_repo, "user-story")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    goal = create_document(ws, type="user-story", title="Draft")
+    body = tmp_repo / goal.body
+    write_body(body, body.read_text(encoding="utf-8") + "\nFilled in.\n")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    result = sync(ws, bump=True)
+    assert result.initialised == (goal.id,)
+    assert goal.id not in result.bumped
+    document = read_sidecar(tmp_repo / goal.sidecar, Document)
+    assert document.version == 1
+    assert document.body_hash == body_hash(body.read_text(encoding="utf-8"))
+    assert document.title == "Draft"
+
+
+def test_check_reports_initialised_bucket(tmp_repo: Path) -> None:
+    """``check`` classifies grace items under ``initialised``, not blocking."""
+    if not (tmp_repo / ".git").exists():
+        pytest.skip("grace period requires a git-initialised tmp_repo (§3.3)")
+    add_template(tmp_repo, "user-story")
+    add_template(tmp_repo, "goal")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    goal = create_document(ws, type="goal", title="Goal")
+    create_document(ws, type="user-story", title="Story", links=[("refines", goal.id)])
+    body = tmp_repo / goal.body
+    write_body(body, body.read_text(encoding="utf-8") + "\nFilled in.\n")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    result = check(ws)
+    assert result.initialised == (goal.id,)
+    assert goal.id not in result.would_bump
+    assert not result.blocked
+
+
+def test_v1_grace_ends_after_first_commit(tmp_repo: Path) -> None:
+    """After the initial commit, normal bump semantics resume (AGENT-013)."""
+    if not (tmp_repo / ".git").exists():
+        pytest.skip("grace period requires a git-initialised tmp_repo (§3.3)")
+    add_template(tmp_repo, "user-story")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    goal = create_document(ws, type="user-story", title="Draft")
+    commit_tree(tmp_repo)
+    body = tmp_repo / goal.body
+    write_body(body, body.read_text(encoding="utf-8") + "\nEdited.\n")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    assert _effective_version(ws, goal.id) == 2
+    result = sync(ws, bump=True)
+    assert result.initialised == ()
+    assert result.bumped == (goal.id,)
+    assert read_sidecar(tmp_repo / goal.sidecar, Document).version == 2
+
+
+def test_hook_pre_commit_initialises_uncommitted_v1(tmp_repo: Path) -> None:
+    """The hook populates uncommitted ``v1`` bodies at version 1 (AGENT-011)."""
+    if not (tmp_repo / ".git").exists():
+        pytest.skip("hook grace requires a git-initialised tmp_repo (§3.3)")
+    add_template(tmp_repo, "user-story")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    goal = create_document(ws, type="user-story", title="Draft")
+    body = tmp_repo / goal.body
+    write_body(body, body.read_text(encoding="utf-8") + "\nFilled in.\n")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    ws.git.stage([goal.body, goal.sidecar])
+    result = hook_pre_commit(ws)
+    assert result.initialised == (goal.id,)
+    assert result.bumped == ()
+    document = read_sidecar(tmp_repo / goal.sidecar, Document)
+    assert document.version == 1
+    assert document.body_hash == body_hash(body.read_text(encoding="utf-8"))
+    # the rewritten sidecar is staged so it travels with the commit
+    staged = ws.git.staged_paths()
+    assert goal.sidecar in staged
+
+
+# --------------------------------------------------------------------------
+# authoring flags (AGENT_READINESS §3.2–§3.5, AGENT-015…AGENT-019)
+# --------------------------------------------------------------------------
+
+
+def _story_sections() -> list[dict[str, object]]:
+    return [
+        {"heading": "Story", "required": True, "placeholder": "As a <role>, …"},
+        {"heading": "Rationale", "required": False, "placeholder": "Why."},
+    ]
+
+
+def _story_template(root: Path) -> None:
+    add_template(
+        root,
+        "user-story",
+        sections=_story_sections(),
+        body="# {{ title }}\n\n## Story\n*As a <role>, …*\n\n## Rationale\n*Why.*\n",
+    )
+
+
+def test_create_document_with_sections(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    result = create_document(
+        ws, type="user-story", title="Upload", sections=[("Story", "As a user, …")]
+    )
+    text = (tmp_repo / result.body).read_text(encoding="utf-8")
+    assert result.kind == "requirement"
+    assert result.version == 1
+    assert result.body_hash == body_hash(text)
+    assert [section.heading for section in result.sections] == ["Story", "Rationale"]
+    assert result.body_text == text
+    assert result.sidecar_document is not None
+    assert result.sidecar_document.id == result.id
+    assert text == "# Upload\n\n## Story\n\nAs a user, …\n\n## Rationale\n\n*Why.*\n"
+
+
+def test_create_document_with_body_text(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    result = create_document(
+        ws, type="user-story", title="Upload", body_text="# Custom\n\nFilled.\n"
+    )
+    text = (tmp_repo / result.body).read_text(encoding="utf-8")
+    assert text == "# Upload\n\nFilled.\n"
+    assert any("replaced H1" in notice for notice in result.notices)
+    document = read_sidecar(tmp_repo / result.sidecar, Document)
+    assert document.body_hash == body_hash(text)
+
+
+def test_create_document_body_and_section_conflict(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    with pytest.raises(ValueError):
+        create_document(
+            ws,
+            type="user-story",
+            title="X",
+            body_text="# X\n",
+            sections=[("Story", "y")],
+        )
+    assert not list((tmp_repo / "documents").rglob("*.md"))
+
+
+def test_create_document_strict_refuses_unfilled_required(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    with pytest.raises(OperationRefused) as excinfo:
+        create_document(ws, type="user-story", title="X", strict=True)
+    assert excinfo.value.finding.code == "E-SECTION-REQUIRED-EMPTY"
+    assert not list((tmp_repo / "documents").rglob("*.md"))
+    ok = create_document(
+        ws,
+        type="user-story",
+        title="X",
+        sections=[("Story", "As a user…")],
+        strict=True,
+    )
+    assert ok.body_hash == body_hash((tmp_repo / ok.body).read_text(encoding="utf-8"))
+
+
+def test_create_document_unknown_section_self_describing(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    with pytest.raises(OperationRefused) as excinfo:
+        create_document(ws, type="user-story", title="X", sections=[("Storyline", "s")])
+    finding = excinfo.value.finding
+    assert finding.code == "E-SECTION-UNKNOWN"
+    details = finding.details or {}
+    assert details["given_heading"] == "Storyline"
+    assert [item["heading"] for item in details["template_sections"]] == [
+        "Story",
+        "Rationale",
+    ]
+    assert not list((tmp_repo / "documents").rglob("*.md"))
+
+
+def test_body_state_reads_current_body(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    created = create_document(ws, type="user-story", title="Upload")
+    write_body(tmp_repo / created.body, "# Upload\n\n## Story\n\nAs a user.\n")
+    ws = Workspace.open(tmp_repo)
+    state = body_state(ws, doc_id=created.id)
+    assert state.id == created.id
+    assert state.body == created.body
+    assert state.body_hash == body_hash(state.text)
+    assert [section.heading for section in state.sections] == ["Story"]
+    (tmp_repo / created.body).unlink()
+    ws = Workspace.open(tmp_repo)
+    with pytest.raises(OperationRefused) as excinfo:
+        body_state(ws, doc_id=created.id)
+    assert excinfo.value.finding.code == "E-BODY-MISSING"
+
+
+def test_update_sections_preserves_unmentioned_content(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    created = create_document(ws, type="user-story", title="Upload")
+    write_body(
+        tmp_repo / created.body,
+        "# Upload\n\n## Story\n\nAs a user.\n\n## Extra\n\nKept.\n",
+    )
+    ws = Workspace.open(tmp_repo)
+    state = body_state(ws, doc_id=created.id)
+    result = update_sections(
+        ws,
+        doc_id=created.id,
+        content={"Rationale": "Because."},
+        base_hash=state.body_hash,
+    )
+    text = (tmp_repo / result.md_path).read_text(encoding="utf-8")
+    assert "## Story\n\nAs a user." in text
+    assert "## Rationale\n\nBecause." in text
+    assert "## Extra\n\nKept." in text
+    assert [section.heading for section in result.sections] == ["Story", "Rationale"]
+    assert result.json_path == created.sidecar
+    with pytest.raises(OperationRefused) as excinfo:
+        update_sections(
+            ws,
+            doc_id=created.id,
+            content={"Rationale": "Again."},
+            base_hash=state.body_hash,
+        )
+    assert excinfo.value.finding.code == "E-BODY-STALE"
+
+
+def test_update_sections_refuses_unknown_heading(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    created = create_document(ws, type="user-story", title="Upload")
+    state = body_state(ws, doc_id=created.id)
+    with pytest.raises(OperationRefused) as excinfo:
+        update_sections(
+            ws,
+            doc_id=created.id,
+            content={"Storyline": "s"},
+            base_hash=state.body_hash,
+        )
+    assert excinfo.value.finding.code == "E-SECTION-UNKNOWN"
+
+
+def test_update_sections_refuses_required_empty(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    created = create_document(
+        ws, type="user-story", title="Upload", sections=[("Story", "As a user.")]
+    )
+    state = body_state(ws, doc_id=created.id)
+    with pytest.raises(OperationRefused) as excinfo:
+        update_sections(
+            ws,
+            doc_id=created.id,
+            content={"Story": ""},
+            base_hash=state.body_hash,
+        )
+    assert excinfo.value.finding.code == "E-SECTION-REQUIRED-EMPTY"
+
+
+def test_update_body_strict_refuses_unfilled_required(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    created = create_document(ws, type="user-story", title="Upload")
+    state = body_state(ws, doc_id=created.id)
+    with pytest.raises(OperationRefused) as excinfo:
+        update_body(
+            ws,
+            doc_id=created.id,
+            text=state.text,
+            base_hash=state.body_hash,
+            strict=True,
+        )
+    assert excinfo.value.finding.code == "E-SECTION-REQUIRED-EMPTY"
+    assert (
+        not (tmp_repo / created.body).exists()
+        or (tmp_repo / created.body).read_text(encoding="utf-8") == state.text
+    )
+    filled = "# Upload\n\n## Story\n\nAs a user.\n\n## Rationale\n\nWhy.\n"
+    result = update_body(
+        ws, doc_id=created.id, text=filled, base_hash=state.body_hash, strict=True
+    )
+    assert result.changed
+    assert result.md_path == created.body
+    assert result.json_path == created.sidecar
+    assert result.notices == ()
+
+
+def test_update_body_carries_notices(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    created = create_document(ws, type="user-story", title="Upload")
+    state = body_state(ws, doc_id=created.id)
+    result = update_body(
+        ws,
+        doc_id=created.id,
+        text=state.text,
+        base_hash=state.body_hash,
+        notices=("stdin read",),
+    )
+    assert result.notices == ("stdin read",)
+    document = read_sidecar(tmp_repo / created.sidecar, Document)
+    assert result.sections == template_sections(ws, template=document.template)
+
+
+def test_supersede_with_body_text(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    old = create_document(ws, type="user-story", title="Old")
+    result = supersede(
+        ws,
+        targets=[old.id],
+        title="New",
+        body_text="# Whatever\n\n## Story\n\nNew story.\n",
+    )
+    text = (tmp_repo / result.body).read_text(encoding="utf-8")
+    assert text == "# New\n\n## Story\n\nNew story.\n"
+    assert result.new is not None
+    assert result.new.kind == "requirement"
+    assert result.new.version == 1
+    assert result.new.body_hash == body_hash(text)
+    assert result.new.body_text == text
+    assert result.new.sections is not None
+    assert [s.heading for s in result.new.sections] == ["Story", "Rationale"]
+    assert result.new.sidecar_document is not None
+
+
+def test_supersede_with_sections_over_copy(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    old = create_document(
+        ws, type="user-story", title="Old", sections=[("Story", "Old story.")]
+    )
+    result = supersede(ws, targets=[old.id], title="New", sections=[("Story", "New.")])
+    text = (tmp_repo / result.body).read_text(encoding="utf-8")
+    assert "## Story\n\nNew." in text
+    assert "Old story." not in text
+    assert "## Rationale" in text
+    with pytest.raises(ValueError):
+        supersede(
+            ws,
+            targets=[old.id],
+            title="X",
+            body_text="# X\n",
+            sections=[("Story", "y")],
+        )
+
+
+def test_supersede_strict_refuses_unfilled_required(tmp_repo: Path) -> None:
+    _story_template(tmp_repo)
+    ws = Workspace.open(tmp_repo)
+    old = create_document(ws, type="user-story", title="Old")
+    with pytest.raises(OperationRefused) as excinfo:
+        supersede(ws, targets=[old.id], title="New", strict=True)
+    assert excinfo.value.finding.code == "E-SECTION-REQUIRED-EMPTY"
+    filled = supersede(
+        ws,
+        targets=[old.id],
+        title="New",
+        sections=[("Story", "As a user.")],
+        strict=True,
+    )
+    assert filled.new is not None and filled.new.body_hash
+
+
+def test_cr_new_with_sections(tmp_repo: Path) -> None:
+    add_template(
+        tmp_repo,
+        "change-request",
+        sections=[
+            {"heading": "Motivation", "required": True, "placeholder": "Explain."},
+            {"heading": "Notes", "required": False, "placeholder": ""},
+        ],
+        body="# {{ title }}\n\n## Motivation\n*Explain.*\n\n## Notes\n",
+    )
+    ws = Workspace.open(tmp_repo)
+    result = cr_new(ws, title="Raise the limit", sections=[("Motivation", "Why.")])
+    text = (tmp_repo / "changes" / f"{result.id}.md").read_text(encoding="utf-8")
+    assert result.sections is not None
+    assert [section.heading for section in result.sections] == ["Motivation", "Notes"]
+    assert result.body_text == text
+    assert "## Motivation\n\nWhy." in text
+    assert result.sidecar_model is not None
+    assert result.sidecar_model.id == result.id
+    assert result.sidecar_model.status == "open"
+    with pytest.raises(OperationRefused) as excinfo:
+        cr_new(ws, title="T", sections=[("Rationale", "x")])
+    assert excinfo.value.finding.code == "E-SECTION-UNKNOWN"
+    with pytest.raises(OperationRefused) as excinfo:
+        cr_new(ws, title="T", strict=True)
+    assert excinfo.value.finding.code == "E-SECTION-REQUIRED-EMPTY"
+
+
+def test_term_add_with_sections(tmp_repo: Path) -> None:
+    add_template(
+        tmp_repo,
+        "term",
+        sections=[
+            {"heading": "Definition", "required": True, "placeholder": "Define."},
+            {"heading": "Notes", "required": False, "placeholder": ""},
+        ],
+        body="# {{ title }}\n\n## Definition\n*Define.*\n\n## Notes\n",
+    )
+    ws = Workspace.open(tmp_repo)
+    result = term_add(
+        ws, term="Knowledge base", aliases=["KB"], sections=[("Definition", "A store.")]
+    )
+    text = (tmp_repo / result.body).read_text(encoding="utf-8")
+    assert result.aliases == ("KB",)
+    assert [section.heading for section in result.sections] == ["Definition", "Notes"]
+    assert result.body_text == text
+    assert "## Definition\n\nA store." in text
+    assert result.body_hash == body_hash(text)
+    with pytest.raises(OperationRefused) as excinfo:
+        term_add(ws, term="Other", strict=True)
+    assert excinfo.value.finding.code == "E-SECTION-REQUIRED-EMPTY"
+
+
+# --------------------------------------------------------------------------
+# introspection (AGENT_READINESS §4.1–§4.3, AGENT-021…AGENT-023)
+# --------------------------------------------------------------------------
+
+
+def test_describe_schema_rulebook(tmp_repo: Path) -> None:
+    from gregraph import __version__
+
+    add_template(tmp_repo, "user-story", sections=_story_sections())
+    add_template(tmp_repo, "change-request")
+    ws = Workspace.open(tmp_repo)
+    info = describe_schema(ws)
+    assert info.schema_ == 1
+    assert info.tool_version == __version__
+    assert info.id_prefix == "RE"
+    assert info.baseline_branch == "main"
+    assert info.versioning == {"on_outdated_links": "block", "on_cr_modified": "warn"}
+    assert info.graph == {"open_conflicts": "warn"}
+    assert info.assets == {"max_size_kb": 5120}
+    assert info.cr["enabled"] is True and info.cr["template"] == "change-request"
+    assert info.kinds == (
+        "goal",
+        "requirement",
+        "design",
+        "verification",
+        "information",
+    )
+    assert len(info.edge_rules) == 9
+    refines = next(rule for rule in info.edge_rules if rule.type == "refines")
+    assert refines.direction == "directed"
+    assert refines.hierarchical and refines.acyclic
+    assert refines.source_kinds == ("goal", "requirement")
+    assert refines.mutually_exclusive_with == ("derives-from",)
+    assert refines.mutually_exclusive_opposite == ("depends-on",)
+    depends = next(rule for rule in info.edge_rules if rule.type == "depends-on")
+    assert depends.mutually_exclusive_opposite == ("derives-from", "refines")
+    conflicts = next(rule for rule in info.edge_rules if rule.type == "conflicts-with")
+    assert conflicts.direction == "symmetric" and not conflicts.acyclic
+    assert info.types["user-story"].kind == "requirement"
+    assert info.types["user-story"].template == "user-story"
+    assert info.types["user-story"].id_prefix == "RE"
+    assert info.types["user-story"].description == "user-story v1"
+    template_info = info.templates["user-story"]
+    assert template_info.latest_version == 1
+    assert template_info.versions == (1,)
+    assert [section.heading for section in template_info.sections] == [
+        "Story",
+        "Rationale",
+    ]
+    assert info.cr_lifecycle.statuses == ("open", "accepted", "rejected", "implemented")
+    assert info.cr_lifecycle.transitions["open"] == ("accepted", "rejected")
+    assert info.cr_lifecycle.transitions["implemented"] == ("open",)
+    assert info.cr_lifecycle.scope_intents == ("modify", "supersede", "deprecate")
+
+
+def test_describe_schema_type_filter(tmp_repo: Path) -> None:
+    add_template(tmp_repo, "user-story")
+    add_template(tmp_repo, "change-request")
+    ws = Workspace.open(tmp_repo)
+    info = describe_schema(ws, type="user-story")
+    assert set(info.types) == {"user-story"}
+    # the type's template, plus the CR template while CRs are enabled
+    assert set(info.templates) == {"user-story", "change-request"}
+    assert info.kinds == (
+        "goal",
+        "requirement",
+        "design",
+        "verification",
+        "information",
+    )
+    with pytest.raises(OperationRefused) as excinfo:
+        describe_schema(ws, type="nope")
+    assert excinfo.value.finding.code == "E-TYPE-UNKNOWN"
+
+
+def test_link_candidates_kind_rule_and_liveness(sample_graph: SampleGraph) -> None:
+    ws = Workspace.open(sample_graph.root)
+    story = sample_graph.ids["story"]
+    result = link_candidates(ws, source=story, edge_type="refines")
+    assert result.source == story
+    assert result.source_kind == "requirement"
+    targets = {candidate.target for candidate in result.candidates}
+    assert sample_graph.ids["feature"] in targets
+    assert sample_graph.ids["goal"] in targets
+    # dead targets are excluded: superseded and deprecated
+    assert sample_graph.ids["story_old"] not in targets
+    assert sample_graph.ids["stale_note"] not in targets
+    # kind rule: refines needs goal|requirement on both ends
+    assert sample_graph.ids["design"] not in targets
+    assert sample_graph.ids["test"] not in targets
+
+
+def test_link_candidates_excludes_cycles(tmp_repo: Path) -> None:
+    add_template(tmp_repo, "user-story")
+    add_template(tmp_repo, "goal")
+    ws = Workspace.open(tmp_repo)
+    goal = create_document(ws, type="goal", title="Goal")
+    story = create_document(
+        ws, type="user-story", title="Story", links=[("refines", goal.id)]
+    )
+    ws = Workspace.open(tmp_repo)
+    result = link_candidates(ws, source=goal.id, edge_type="refines")
+    # story refines goal, so goal refines story would close a directed cycle
+    assert story.id not in {candidate.target for candidate in result.candidates}
+    other = create_document(ws, type="user-story", title="Other")
+    ws = Workspace.open(tmp_repo)
+    result = link_candidates(ws, source=goal.id, edge_type="refines")
+    assert other.id in {candidate.target for candidate in result.candidates}
+
+
+def test_link_candidates_all_types_and_cycle(sample_graph: SampleGraph) -> None:
+    ws = Workspace.open(sample_graph.root)
+    orphan = sample_graph.ids["orphan"]  # assumption → information kind
+    result = link_candidates(ws, source=orphan)
+    assert result.allowed_edge_types == ("supersedes", "relates-to")
+    supersedes_targets = {
+        candidate.target
+        for candidate in result.candidates
+        if candidate.type == "supersedes"
+    }
+    # same-kind-only: stakeholder is information like orphan; stale_note is dead
+    assert supersedes_targets == {sample_graph.ids["stakeholder"]}
+    relates = {
+        candidate.target
+        for candidate in result.candidates
+        if candidate.type == "relates-to"
+    }
+    assert sample_graph.ids["goal"] in relates
+    with pytest.raises(ValueError):
+        link_candidates(ws, source=orphan, edge_type="bogus")  # type: ignore[arg-type]
+    with pytest.raises(OperationRefused) as excinfo:
+        link_candidates(ws, source="RE-NOSUCH")
+    assert excinfo.value.finding.code == "E-ID-UNKNOWN"
+
+
+# --------------------------------------------------------------------------
+# context packing (AGENT_READINESS §6.1, §6.3, AGENT-027, AGENT-030)
+# --------------------------------------------------------------------------
+
+
+def test_build_context_targets_and_neighbors(sample_graph: SampleGraph) -> None:
+    ws = Workspace.open(sample_graph.root)
+    story = sample_graph.ids["story"]
+    result = build_context(ws, ids=[story])
+    assert result.requested == (story,)
+    assert result.depth == 1
+    assert result.direction == "both"
+    target = result.targets[0]
+    assert target.show.id == story
+    assert target.show.body_text is not None
+    neighbours = {neighbour.id: neighbour for neighbour in result.neighbors}
+    # downstream: story's own edges; upstream: edges stored on the neighbours
+    assert set(neighbours) == {
+        sample_graph.ids["feature"],
+        sample_graph.ids["story_old"],
+        sample_graph.ids["fr"],
+        sample_graph.ids["test"],
+    }
+    feature = neighbours[sample_graph.ids["feature"]]
+    assert feature.direction == "downstream"
+    assert feature.depth == 1
+    assert feature.freshness == "fresh"
+    assert feature.via.source == story and feature.via.type == "refines"
+    assert feature.sidecar.id == feature.id
+    assert "Sample body" in feature.body
+    fr = neighbours[sample_graph.ids["fr"]]
+    assert fr.direction == "upstream"
+    assert fr.via.type == "depends-on"
+
+
+def test_build_context_direction_and_depth(sample_graph: SampleGraph) -> None:
+    ws = Workspace.open(sample_graph.root)
+    story = sample_graph.ids["story"]
+    downstream = build_context(ws, ids=[story], direction="downstream")
+    assert {n.id for n in downstream.neighbors} == {
+        sample_graph.ids["feature"],
+        sample_graph.ids["story_old"],
+    }
+    upstream = build_context(ws, ids=[story], direction="upstream")
+    assert {n.id for n in upstream.neighbors} == {
+        sample_graph.ids["fr"],
+        sample_graph.ids["test"],
+    }
+    deep = build_context(ws, ids=[story], depth=2)
+    neighbours = {n.id: n for n in deep.neighbors}
+    assert neighbours[sample_graph.ids["scan_story"]].depth == 2
+    shallow = build_context(ws, ids=[story], depth=0)
+    assert shallow.neighbors == ()
+
+
+def test_build_context_validation_errors(sample_graph: SampleGraph) -> None:
+    ws = Workspace.open(sample_graph.root)
+    with pytest.raises(ValueError):
+        build_context(ws, ids=[], depth=1)
+    with pytest.raises(ValueError):
+        build_context(ws, ids=["RE-X"], depth=-1)
+    with pytest.raises(ValueError):
+        build_context(ws, ids=["RE-X"], direction="sideways")  # type: ignore[arg-type]
+    with pytest.raises(OperationRefused) as excinfo:
+        build_context(ws, ids=["RE-NOSUCH"])
+    assert excinfo.value.finding.code == "E-ID-UNKNOWN"
+    assert excinfo.value.finding.subject == "RE-NOSUCH"
+
+
+def test_build_context_terms(tmp_repo: Path) -> None:
+    add_template(tmp_repo, "user-story")
+    add_template(
+        tmp_repo,
+        "term",
+        sections=[
+            {"heading": "Definition", "required": True, "placeholder": "Define."},
+            {"heading": "Notes", "required": False, "placeholder": ""},
+        ],
+        body="# {{ title }}\n\n## Definition\n*Define.*\n\n## Notes\n",
+    )
+    ws = Workspace.open(tmp_repo)
+    doc = create_document(ws, type="user-story", title="Upload")
+    term_add(ws, term="Knowledge base", aliases=["KB"])
+    write_body(
+        tmp_repo / doc.body, "# Upload\n\nThe Knowledge base (KB) stores files.\n"
+    )
+    ws = Workspace.open(tmp_repo)
+    result = build_context(ws, ids=[doc.id])
+    assert [term.slug for term in result.terms] == ["knowledge-base"]
+    entry = result.terms[0]
+    assert entry.term == "Knowledge base"
+    assert entry.aliases == ("KB",)
+    assert "## Definition" in entry.body
+    without_terms = build_context(ws, ids=[doc.id], include_terms=False)
+    assert without_terms.terms == ()
+
+
+def test_build_context_findings_scoped_to_bundle(tmp_repo: Path) -> None:
+    add_template(tmp_repo, "user-story")
+    ws = Workspace.open(tmp_repo)
+    inside = create_document(ws, type="user-story", title="Inside")
+    outside = create_document(ws, type="user-story", title="Outside")
+    write_body(
+        tmp_repo / outside.body,
+        "# Outside\n\n## Story\n\n*As a <role>, …*\n",
+    )  # unfilled required section only on the outside document
+    ws = Workspace.open(tmp_repo)
+    result = build_context(ws, ids=[inside.id])
+    subjects = {str(finding.subject) for finding in result.findings}
+    assert all(subject == inside.id for subject in subjects)
+    result = build_context(ws, ids=[inside.id, outside.id])
+    subjects = {str(finding.subject) for finding in result.findings}
+    assert outside.id in subjects
+
+
+def test_build_context_pending_finding_git_mode(tmp_repo: Path) -> None:
+    if not (tmp_repo / ".git").exists():
+        pytest.skip("pending freshness is a git-mode state (§7.4)")
+    add_template(tmp_repo, "user-story")
+    add_template(tmp_repo, "goal")
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    goal = create_document(ws, type="goal", title="Goal")
+    story = create_document(
+        ws, type="user-story", title="Story", links=[("refines", goal.id)]
+    )
+    commit_tree(tmp_repo)
+    write_body(
+        tmp_repo / goal.body,
+        (tmp_repo / goal.body).read_text(encoding="utf-8") + "\nEdited.\n",
+    )
+    ws = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+    result = build_context(ws, ids=[story.id])
+    pending = [f for f in result.findings if f.code == "W-LINK-PENDING"]
+    assert pending and pending[0].subject == story.id
+    neighbour = next(n for n in result.neighbors if n.id == goal.id)
+    assert neighbour.freshness == "pending-outdated"
+
+
+def test_build_context_synthesises_pending_without_git(tmp_repo: Path) -> None:
+    """Degraded mode: validate gates W-LINK-PENDING on git; context synthesises."""
+    if (tmp_repo / ".git").exists():
+        pytest.skip("synthesis covers the no-git gate (§6.1)")
+    add_template(tmp_repo, "user-story")
+    add_template(tmp_repo, "goal")
+    ws = Workspace.open(tmp_repo)
+    goal = create_document(ws, type="goal", title="Goal")
+    story = create_document(
+        ws, type="user-story", title="Story", links=[("refines", goal.id)]
+    )
+    write_body(
+        tmp_repo / goal.body,
+        (tmp_repo / goal.body).read_text(encoding="utf-8") + "\nEdited.\n",
+    )
+    ws = Workspace.open(tmp_repo)
+    result = build_context(ws, ids=[story.id])
+    pending = [f for f in result.findings if f.code == "W-LINK-PENDING"]
+    assert pending and pending[0].subject == story.id
+    assert any(
+        n.id == goal.id and n.freshness == "pending-outdated" for n in result.neighbors
+    )
+
+
+def test_build_context_cr_targets_and_scope_neighbors(tmp_repo: Path) -> None:
+    add_template(tmp_repo, "user-story")
+    add_template(tmp_repo, "change-request")
+    ws = Workspace.open(tmp_repo)
+    doc = create_document(ws, type="user-story", title="Target")
+    created = cr_new(ws, title="Change", scope=[doc.id])
+    ws = Workspace.open(tmp_repo)
+    result = build_context(ws, ids=[created.id])
+    assert result.requested == (created.id,)
+    target = result.targets[0]
+    assert target.show.change_request is not None
+    assert target.show.change_request.body != ""
+    neighbour = next(n for n in result.neighbors if n.id == doc.id)
+    assert neighbour.via.type == "scope"
+    assert neighbour.via.source == created.id
+    assert neighbour.direction == "downstream"
+    assert neighbour.freshness == "fresh"
+
+
+def test_list_documents_include_body(tmp_repo: Path) -> None:
+    add_template(tmp_repo, "user-story")
+    ws = Workspace.open(tmp_repo)
+    created = create_document(ws, type="user-story", title="Upload")
+    with_body = list_documents(ws, include_body=True)
+    assert with_body.rows[0].body == (tmp_repo / created.body).read_text(
+        encoding="utf-8"
+    )
+    without_body = list_documents(ws)
+    assert without_body.rows[0].body is None
+
+
+# --------------------------------------------------------------------------
+# agent scaffolding (AGENT_READINESS §7.1–§7.3, AGENT-031…AGENT-033)
+# --------------------------------------------------------------------------
+
+
+def test_init_writes_agent_files(tmp_path: Path) -> None:
+    target = tmp_path / "repo"
+    result = init_repository(target, no_git=True)
+    assert result.agents_files == agents.AGENTS_FILES
+    agents_md = target / "AGENTS.md"
+    skill_md = target / ".agents" / "skills" / "gregraph" / "SKILL.md"
+    assert agents_md.is_file() and skill_md.is_file()
+    text = agents_md.read_text(encoding="utf-8")
+    assert agents.AGENTS_BLOCK_START in text and agents.AGENTS_BLOCK_END in text
+    assert skill_md.read_text(encoding="utf-8").startswith("---\nname: gregraph\n")
+
+
+def test_repair_agents_writes_and_is_idempotent(tmp_repo: Path) -> None:
+    ws = Workspace.open(tmp_repo)
+    first = repair_agents(ws)
+    assert first.agents_files == agents.AGENTS_FILES
+    assert first.changed == agents.AGENTS_FILES
+    assert (tmp_repo / "AGENTS.md").is_file()
+    second = repair_agents(ws)
+    assert second.changed == ()
+    (tmp_repo / "AGENTS.md").write_text("# Custom instructions\n", encoding="utf-8")
+    third = repair_agents(ws)
+    assert third.changed == (agents.AGENTS_REL_PATH,)
+    text = (tmp_repo / "AGENTS.md").read_text(encoding="utf-8")
+    assert text.startswith("# Custom instructions\n")
+    assert text.count(agents.AGENTS_BLOCK_START) == 1
+
+
+def test_sync_refreshes_agent_files(tmp_repo: Path) -> None:
+    add_template(tmp_repo, "user-story")
+    ws = Workspace.open(tmp_repo)
+    create_document(ws, type="user-story", title="Draft")
+    result = sync(ws, bump=True)
+    assert result.agents_files_changed == agents.AGENTS_FILES
+    again = sync(ws, bump=True)
+    assert again.agents_files_changed == ()
+
+
+def test_template_show_reports_path(tmp_repo: Path) -> None:
+    add_template(tmp_repo, "user-story")
+    ws = Workspace.open(tmp_repo)
+    result = template_show(ws, "user-story")
+    assert result.path == Path(".gregraph/templates/user-story/v1/template.md")

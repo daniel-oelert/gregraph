@@ -182,6 +182,48 @@ def test_status_modified_unbumped_listed(
     assert "WIP: yes" in out.splitlines()[0]
 
 
+def test_status_pending_initial_version_note(
+    tmp_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """AGENT_READINESS §3.3: uncommitted edited ``v1`` documents with inbound
+    links are listed under a *pending initial version* note — no new status
+    is invented (they stay ``draft``), and grace items without inbound links
+    or without unbumped modifications are not listed."""
+    if not (tmp_repo / ".git").exists():
+        pytest.skip("the grace period is a git-mode behaviour")
+    add_template(tmp_repo, "goal")
+    baseline_commit(tmp_repo)
+    workspace = Workspace.open(tmp_repo)
+    target = create_document(workspace, type="goal", title="Target")
+    # The inbound link: `source` points at `target` but nothing points at
+    # `source`, so only `target` can appear in the note.
+    create_document(
+        workspace, type="goal", title="Source", links=[("relates-to", target.id)]
+    )
+    # In grace with an inbound link, but its stored hash matches the file:
+    # the initial version is not pending, so it is not listed.
+    untouched = create_document(workspace, type="goal", title="Untouched")
+    create_document(
+        workspace,
+        type="goal",
+        title="Other linker",
+        links=[("relates-to", untouched.id)],
+    )
+    body = next((tmp_repo / "documents").rglob(f"{target.id}.md"))
+    body.write_text(body.read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8")
+    capsys.readouterr()
+    assert main(["--repo", str(tmp_repo), "status"]) == 0
+    out = capsys.readouterr().out
+    note_lines = [
+        line for line in out.splitlines() if line.startswith("pending initial version")
+    ]
+    assert note_lines == [
+        f"pending initial version (v1 with inbound links): {target.id}"
+    ]
+    payload = status_json(tmp_repo)
+    assert payload["pending_initial_version"] == [target.id]
+
+
 def test_status_always_exits_zero_with_errors(
     tmp_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

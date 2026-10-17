@@ -1153,7 +1153,7 @@ def test_w_cr_mention_unscoped(tmp_repo: Path) -> None:
     setup_repo(tmp_repo)
     make_doc(tmp_repo, "AAAAAA")
     make_doc(tmp_repo, "BBBBBB")
-    cr_id = make_cr(tmp_repo, text=f"# Raise the limit\n\nTouches {DOC2}.\n")
+    cr_id = make_cr(tmp_repo, text=f"# Raise the limit\n\nTouches [[{DOC2}]].\n")
     findings = of_code(
         validate_workspace(ws_of(tmp_repo, git=False)), "W-CR-MENTION-UNSCOPED"
     )
@@ -1161,7 +1161,7 @@ def test_w_cr_mention_unscoped(tmp_repo: Path) -> None:
     assert DOC2 in findings[0].message
     make_cr(
         tmp_repo,
-        text=f"# Raise the limit\n\nTouches {DOC2}.\n",
+        text=f"# Raise the limit\n\nTouches [[{DOC2}]].\n",
         scope=[ScopeEntry(id=DOC2, intent="modify", base_version=1)],
     )
     assert not of_code(
@@ -1171,11 +1171,25 @@ def test_w_cr_mention_unscoped(tmp_repo: Path) -> None:
 
 def test_e_mention_unknown_in_cr_body(tmp_repo: Path) -> None:
     setup_repo(tmp_repo)
-    cr_id = make_cr(tmp_repo, text="# Raise the limit\n\nSee RE-ZZZZZZ.\n")
+    cr_id = make_cr(tmp_repo, text="# Raise the limit\n\nSee [[RE-ZZZZZZ]].\n")
     findings = of_code(
         validate_workspace(ws_of(tmp_repo, git=False)), "E-MENTION-UNKNOWN"
     )
     assert findings and findings[0].subject == cr_id
+
+
+def test_cr_body_bare_ids_are_not_mentions(tmp_repo: Path) -> None:
+    # D-AGENT-6 (§5.2): bare ID-shaped prose in a CR body is not a mention
+    setup_repo(tmp_repo)
+    make_doc(tmp_repo, "AAAAAA")
+    make_cr(tmp_repo, text="# Raise the limit\n\nTouches RE-BBBBBB.\n")
+    make_cr(
+        tmp_repo,
+        text="# Raise the limit\n\nSee RE-ZZZZZZ and multi-target here.\n",
+    )
+    findings = validate_workspace(ws_of(tmp_repo, git=False))
+    assert not of_code(findings, "W-CR-MENTION-UNSCOPED")
+    assert not of_code(findings, "E-MENTION-UNKNOWN")
 
 
 def test_cr_body_validated_against_template(tmp_repo: Path) -> None:
@@ -1336,3 +1350,177 @@ def test_status_issues_empty_and_mismatch(tmp_repo: Path) -> None:
     write_sidecar(tmp_repo / "changes" / f"{cr_id}.json", cr)
     issues = status_issues(read_cr(tmp_repo, cr_id))
     assert any("differs" in issue.message for issue in issues)
+
+
+# --------------------------------------------------------------------------
+# v1 grace period (AGENT_READINESS §3.3, AGENT-012)
+# --------------------------------------------------------------------------
+
+
+def test_document_effective_version_grace(tmp_repo: Path) -> None:
+    """An uncommitted ``v1`` document stays effectively at 1 (AGENT-012)."""
+    from gregraph.core.changes import document_effective_version
+
+    require_git(tmp_repo)
+    setup_repo(tmp_repo)
+    doc_id = make_doc(tmp_repo, "AAAAAA")
+    ws = ws_of(tmp_repo)
+    assert document_effective_version(ws, doc_id) == 1
+    write_doc_body(tmp_repo, doc_id, "# First document\n\nEdited.\n")
+    ws = ws_of(tmp_repo)
+    assert document_effective_version(ws, doc_id) == 1  # populated in place
+    git_commit(tmp_repo, "initial")
+    write_doc_body(tmp_repo, doc_id, "# First document\n\nEdited again.\n")
+    ws = ws_of(tmp_repo)
+    assert document_effective_version(ws, doc_id) == 2  # grace ended (AGENT-013)
+
+
+def test_document_effective_version_degraded_bumps(tmp_repo: Path) -> None:
+    """Degraded mode has no grace period (AGENT-014)."""
+    from gregraph.core.changes import document_effective_version
+
+    setup_repo(tmp_repo)
+    doc_id = make_doc(tmp_repo, "AAAAAA")
+    ws = ws_of(tmp_repo, git=False)
+    assert document_effective_version(ws, doc_id) == 1
+    write_doc_body(tmp_repo, doc_id, "# First document\n\nEdited.\n")
+    ws = ws_of(tmp_repo, git=False)
+    assert document_effective_version(ws, doc_id) == 2
+
+
+def test_cr_effective_version_grace(tmp_repo: Path) -> None:
+    """An uncommitted ``v1`` CR is populated at 1 (§3.3 edge cases)."""
+    from gregraph.core.changes import effective_cr_version
+
+    require_git(tmp_repo)
+    setup_repo(tmp_repo)
+    cr_id = make_cr(tmp_repo)
+    ws = ws_of(tmp_repo)
+    assert effective_cr_version(ws, cr_id) == 1
+    write_body(tmp_repo / "changes" / f"{cr_id}.md", "# Raise the limit\n\nEdited.\n")
+    ws = ws_of(tmp_repo)
+    assert effective_cr_version(ws, cr_id) == 1
+    git_commit(tmp_repo, "cr")
+    write_body(tmp_repo / "changes" / f"{cr_id}.md", "# Raise the limit\n\nAgain.\n")
+    ws = ws_of(tmp_repo)
+    assert effective_cr_version(ws, cr_id) == 2
+
+
+def test_effective_version_from_in_grace_flag(tmp_repo: Path) -> None:
+    from gregraph.core.changes import effective_version_from
+
+    setup_repo(tmp_repo)
+    cr = read_cr(tmp_repo, make_cr(tmp_repo))
+    body = "# Raise the limit\n\nBody.\n"
+    assert effective_version_from(cr, body) == 1  # unchanged content
+    assert effective_version_from(cr, "# Other\n", in_grace=True) == 1
+    assert effective_version_from(cr, "# Other\n") == 2  # no grace flag
+    # a missing body is never a grace case
+    assert effective_version_from(cr, None, in_grace=True) == 2
+    cr2 = read_cr(tmp_repo, make_cr(tmp_repo, "DDDDDD", version=3))
+    assert effective_version_from(cr2, "# Other\n", in_grace=True) == 4
+
+
+# --------------------------------------------------------------------------
+# rich cr payloads (AGENT_READINESS §2.4.4)
+# --------------------------------------------------------------------------
+
+
+def test_cr_new_sections_and_rich_result(tmp_repo: Path) -> None:
+    add_template(
+        tmp_repo,
+        "change-request",
+        sections=[
+            {"heading": "Motivation", "required": True, "placeholder": "Explain."},
+            {"heading": "Notes", "required": False, "placeholder": ""},
+        ],
+        body="# {{ title }}\n\n## Motivation\n*Explain.*\n\n## Notes\n",
+    )
+    make_doc(tmp_repo, "AAAAAA")
+    ws = ws_of(tmp_repo, git=False)
+    result = cr_new(ws, title="Raise the limit", sections=[("Motivation", "Why.")])
+    text = read_body(tmp_repo / "changes" / f"{result.id}.md")
+    assert result.body_text == text
+    assert [section.heading for section in result.sections] == ["Motivation", "Notes"]
+    assert "## Motivation\n\nWhy." in text
+    assert result.sidecar_model is not None
+    assert result.sidecar_model.id == result.id
+    with pytest.raises(OperationRefused) as excinfo:
+        cr_new(ws, title="T", sections=[("Bogus", "x")])
+    finding = excinfo.value.finding
+    assert finding.code == "E-SECTION-UNKNOWN"
+    assert finding.details is not None and "template_sections" in finding.details
+    assert not list((tmp_repo / "changes").glob("*.md"))[1:]
+
+
+def test_cr_new_strict_refuses_unfilled_required(tmp_repo: Path) -> None:
+    add_template(
+        tmp_repo,
+        "change-request",
+        sections=[
+            {"heading": "Motivation", "required": True, "placeholder": "Explain."},
+        ],
+        body="# {{ title }}\n\n## Motivation\n*Explain.*\n",
+    )
+    ws = ws_of(tmp_repo, git=False)
+    before = sorted(p.name for p in (tmp_repo / "changes").iterdir())
+    with pytest.raises(OperationRefused) as excinfo:
+        cr_new(ws, title="T", strict=True)
+    assert excinfo.value.finding.code == "E-SECTION-REQUIRED-EMPTY"
+    assert sorted(p.name for p in (tmp_repo / "changes").iterdir()) == before
+    ok = cr_new(ws, title="T", sections=[("Motivation", "Why.")], strict=True)
+    assert read_cr(tmp_repo, ok.id).version == 1
+
+
+def test_scope_add_remove_rich_fields(tmp_repo: Path) -> None:
+    setup_repo(tmp_repo)
+    make_doc(tmp_repo, "AAAAAA")
+    cr_id = make_cr(tmp_repo)
+    ws = ws_of(tmp_repo, git=False)
+    added = cr_scope_add(ws, cr_id=cr_id, target=DOC)
+    assert added.added == ScopeEntry(id=DOC, intent="modify", base_version=1)
+    removed = cr_scope_remove(ws, cr_id=cr_id, target=DOC)
+    assert removed.removed == DOC
+    assert removed.scope == ()
+
+
+def test_cr_set_applied_keys(tmp_repo: Path) -> None:
+    setup_repo(tmp_repo)
+    cr_id = make_cr(tmp_repo)
+    ws = ws_of(tmp_repo, git=False)
+    result = cr_set(
+        ws, cr_id=cr_id, assignments=["branch=cr/a", "tags=a,b", "extra.k=v"]
+    )
+    assert result.applied == {"branch": "cr/a", "tags": ["a", "b"], "extra.k": "v"}
+    result = cr_set(ws, cr_id=cr_id, assignments=["status=accepted", "extra.k="])
+    assert result.applied["status"] == "accepted"
+    assert result.applied["extra.k"] is None
+    assert result.decision is not None
+
+
+def test_cr_reanalyze_updated_entries(tmp_repo: Path) -> None:
+    from gregraph.core.changes import CrScopeUpdate
+
+    setup_repo(tmp_repo)
+    make_doc(tmp_repo, "AAAAAA", version=2)
+    cr_id = make_cr(
+        tmp_repo, scope=[ScopeEntry(id=DOC, intent="supersede", base_version=1)]
+    )
+    ws = ws_of(tmp_repo, git=False)
+    result = cr_reanalyze(ws, cr_id=cr_id)
+    assert result.updated == (
+        CrScopeUpdate(
+            id=DOC, intent="supersede", old_base_version=1, new_base_version=2
+        ),
+    )
+    again = cr_reanalyze(ws, cr_id=cr_id)
+    assert again.updated == ()
+    assert not again.changed
+
+
+def test_cr_show_carries_body(tmp_repo: Path) -> None:
+    setup_repo(tmp_repo)
+    cr_id = make_cr(tmp_repo)
+    ws = ws_of(tmp_repo, git=False)
+    result = cr_show(ws, cr_id)
+    assert result.body == read_body(tmp_repo / "changes" / f"{cr_id}.md")

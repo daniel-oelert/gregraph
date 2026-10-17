@@ -2,11 +2,12 @@
 
 WIP header (``WIP: yes (3 drafts, 1 modified)`` / ``WIP: no``, spec §8),
 counts of documents by status, drafts with paths, modified-unbumped items,
-outdated/stale/pending-outdated links, open conflicts (§11.1), deprecated
-template pins (§7.7), change requests by effective status with pending
-decisions and drift (§9.3, §9.6), hook state (§12.3) and degraded mode.
-Exits 0 regardless. Thin: parse → :func:`gregraph.core.operations.status` →
-format.
+the *pending initial version* note for uncommitted modified ``v1`` documents
+with inbound links (AGENT_READINESS §3.3), outdated/stale/pending-outdated
+links, open conflicts (§11.1), deprecated template pins (§7.7), change
+requests by effective status with pending decisions and drift (§9.3, §9.6),
+hook state (§12.3) and degraded mode. Exits 0 regardless. Thin: parse →
+:func:`gregraph.core.operations.status` → format.
 """
 
 from __future__ import annotations
@@ -85,14 +86,13 @@ def _finding_payload(finding: Finding) -> dict[str, Any]:
 
 
 def _payload(result: StatusResult) -> dict[str, Any]:
-    wip = result.wip
-    return {
+    payload: dict[str, Any] = {
         "wip": {
-            "header": wip_header(wip),
-            "is_wip": wip.is_wip,
-            "drafts": [_item_payload(item) for item in wip.drafts],
-            "modified": [_item_payload(item) for item in wip.modified],
-            "uncommitted": [str(path) for path in wip.uncommitted],
+            "header": wip_header(result.wip),
+            "is_wip": result.wip.is_wip,
+            "drafts": [_item_payload(item) for item in result.wip.drafts],
+            "modified": [_item_payload(item) for item in result.wip.modified],
+            "uncommitted": [str(path) for path in result.wip.uncommitted],
         },
         "documents": dict(result.document_counts),
         "links": {
@@ -116,6 +116,10 @@ def _payload(result: StatusResult) -> dict[str, Any]:
         "degraded": result.degraded,
         "findings": [_finding_payload(finding) for finding in result.findings],
     }
+    # AGENT_READINESS §3.3: only present when there is something to note.
+    if result.pending_initial_version:
+        payload["pending_initial_version"] = list(result.pending_initial_version)
+    return payload
 
 
 def _print_report(app: App, result: StatusResult) -> None:
@@ -140,6 +144,12 @@ def _print_report(app: App, result: StatusResult) -> None:
         out.line("uncommitted:")
         for path in result.wip.uncommitted:
             out.line(f"  {path.as_posix()}")
+    if result.pending_initial_version:
+        # AGENT_READINESS §3.3: no new status is invented — just a note.
+        out.line(
+            "pending initial version (v1 with inbound links): "
+            f"{', '.join(result.pending_initial_version)}"
+        )
     out.line(
         "links: "
         f"{len(result.outdated)} outdated, "

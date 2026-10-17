@@ -8,6 +8,7 @@ single-PR walkthroughs end-to-end via the CLI. CLI tests invoke
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -317,3 +318,228 @@ def test_single_pr_walkthrough(git_repo: Path) -> None:
     assert model.status == "implemented"
     updated = read_sidecar(root / "documents" / "feature" / f"{target}.json", Document)
     assert updated.version == 2
+
+
+# --------------------------------------------------------------------------
+# --json payloads (AGENT_READINESS §2.4.4) and cr new authoring flags (§3.4)
+# --------------------------------------------------------------------------
+
+
+def test_cr_new_json_payload(repo: Path, capsys) -> None:
+    target = write_doc(repo, "user-story", "Scoped story")
+    capsys.readouterr()
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "cr",
+            "new",
+            "--title",
+            "Change the story",
+            "--scope",
+            f"{target}:modify",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {
+        "id",
+        "uuid",
+        "md_path",
+        "json_path",
+        "template",
+        "sections",
+        "body",
+        "sidecar",
+        "scope",
+        "status",
+        "findings",
+        "notices",
+    }
+    assert payload["status"] == "open"
+    assert payload["md_path"] == str(
+        (repo / "changes" / f"{payload['id']}.md").relative_to(repo)
+    )
+    assert payload["scope"] == [{"id": target, "intent": "modify", "base_version": 1}]
+    assert payload["sidecar"]["id"] == payload["id"]
+    assert payload["template"] == {"name": "change-request", "version": 1}
+
+
+def test_cr_new_section_flags_fill_the_body(repo: Path, capsys) -> None:
+    capsys.readouterr()
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "cr",
+            "new",
+            "--title",
+            "Filled CR",
+            "--section",
+            "Motivation=Because it matters.",
+            "--section",
+            "Proposed change=Rewrite the story.",
+            "--section",
+            "Impact=One inbound link.",
+            "--strict",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert "Because it matters." in payload["body"]
+    cr = cr_model(repo, payload["id"])
+    assert cr.status == "open"
+
+
+def test_cr_new_body_flag_is_usage_error(repo: Path) -> None:
+    """``cr new`` takes sections only (no whole-body flags)."""
+    assert (
+        main(
+            [
+                "--repo",
+                str(repo),
+                "cr",
+                "new",
+                "--title",
+                "T",
+                "--body",
+                "text",
+                "--no-input",
+            ]
+        )
+        == 2
+    )
+
+
+def test_cr_new_unknown_section_refusal(repo: Path, capsys) -> None:
+    exit_code = main(
+        [
+            "--repo",
+            str(repo),
+            "cr",
+            "new",
+            "--title",
+            "T",
+            "--section",
+            "Missing=x",
+            "--no-input",
+            "--json",
+        ]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 4
+    payload = json.loads(out.out)
+    assert payload["error"]["code"] == "E-SECTION-UNKNOWN"
+    details = payload["error"]["finding"]["details"]
+    assert details["given_heading"] == "Missing"
+    assert "Motivation" in [s["heading"] for s in details["template_sections"]]
+
+
+def test_cr_scope_add_and_remove_json(repo: Path, capsys) -> None:
+    target = write_doc(repo, "user-story", "Scoped story")
+    assert main(["--repo", str(repo), "cr", "new", "--title", "CR", "--no-input"]) == 0
+    cr_id = cr_id_in(repo)
+    capsys.readouterr()
+    exit_code = main(
+        ["--repo", str(repo), "cr", "scope", "add", cr_id, target, "--json"]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {"cr", "added", "scope", "findings", "notices"}
+    assert payload["cr"] == cr_id
+    assert payload["added"] == {
+        "id": target,
+        "intent": "modify",
+        "base_version": 1,
+    }
+    exit_code = main(
+        ["--repo", str(repo), "cr", "scope", "remove", cr_id, target, "--json"]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {"cr", "removed", "scope", "findings", "notices"}
+    assert payload["removed"] == target
+    assert payload["scope"] == []
+
+
+def test_cr_set_reaffirm_reanalyze_json(repo: Path, capsys) -> None:
+    assert main(["--repo", str(repo), "cr", "new", "--title", "CR", "--no-input"]) == 0
+    cr_id = cr_id_in(repo)
+    capsys.readouterr()
+    exit_code = main(
+        ["--repo", str(repo), "cr", "set", cr_id, "status=accepted", "--json"]
+    )
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {"cr", "applied", "decision", "findings", "notices"}
+    assert payload["applied"] == {"status": "accepted"}
+    assert payload["decision"]["status"] == "accepted"
+    exit_code = main(["--repo", str(repo), "cr", "reaffirm", cr_id, "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {"cr", "decision", "findings", "notices"}
+    assert payload["decision"]["status"] == "accepted"
+    exit_code = main(["--repo", str(repo), "cr", "reanalyze", cr_id, "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {"cr", "updated", "findings", "notices"}
+    assert isinstance(payload["updated"], list)
+
+
+def test_cr_list_json_rows(repo: Path, capsys) -> None:
+    assert main(["--repo", str(repo), "cr", "new", "--title", "CR", "--no-input"]) == 0
+    cr_id = cr_id_in(repo)
+    capsys.readouterr()
+    exit_code = main(["--repo", str(repo), "cr", "list", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert payload == [
+        {
+            "id": cr_id,
+            "title": "CR",
+            "status": "open",
+            "effective": "open",
+            "drift": False,
+        }
+    ]
+
+
+def test_cr_show_json_matches_show_command(repo: Path, capsys) -> None:
+    target = write_doc(repo, "user-story", "Scoped story")
+    assert (
+        main(
+            [
+                "--repo",
+                str(repo),
+                "cr",
+                "new",
+                "--title",
+                "CR",
+                "--scope",
+                target,
+                "--no-input",
+            ]
+        )
+        == 0
+    )
+    cr_id = cr_id_in(repo)
+    capsys.readouterr()
+    exit_code = main(["--repo", str(repo), "cr", "show", cr_id, "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert payload["id"] == cr_id
+    assert payload["kind"] == "change-request"
+    assert payload["scope"][0]["id"] == target

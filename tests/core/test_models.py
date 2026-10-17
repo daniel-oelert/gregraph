@@ -515,3 +515,59 @@ def test_finding_rejects_both_id_and_path() -> None:
 def test_finding_rejects_unknown_severity() -> None:
     with pytest.raises(ValidationError):
         Finding(code="E-CYCLE", severity="error", subject="RE-2", message="x")  # type: ignore[arg-type]
+
+
+def test_finding_without_details_omits_details_key() -> None:
+    finding = Finding(code="E-CYCLE", severity="E", subject="RE-2", message="cycle")
+    assert "details" not in finding.model_dump(mode="json")
+
+
+def test_finding_details_serialised_when_present() -> None:
+    finding = Finding(
+        code="E-CYCLE",
+        severity="E",
+        subject="RE-A",
+        message="adding RE-B refines RE-A creates a cycle",
+        details={"cycle": ["RE-A", "RE-B"]},
+    )
+    assert finding.model_dump(mode="json") == {
+        "code": "E-CYCLE",
+        "severity": "E",
+        "id": "RE-A",
+        "message": "adding RE-B refines RE-A creates a cycle",
+        "details": {"cycle": ["RE-A", "RE-B"]},
+    }
+
+
+def test_finding_details_roundtrips() -> None:
+    finding = Finding(
+        code="E-CYCLE",
+        severity="E",
+        subject="RE-A",
+        message="cycle",
+        details={"cycle": ["RE-A", "RE-B"]},
+    )
+    dumped = _assert_roundtrip(finding)
+    assert dumped["details"] == {"cycle": ["RE-A", "RE-B"]}
+    assert Finding.model_validate(dumped) == finding
+
+
+def test_finding_details_preserved_from_report_shape() -> None:
+    restored = Finding.model_validate(
+        {
+            "code": "E-CYCLE",
+            "severity": "E",
+            "id": "RE-A",
+            "message": "cycle",
+            "details": {"cycle": ["RE-A", "RE-B"]},
+        }
+    )
+    assert restored.subject == "RE-A"
+    assert restored.details == {"cycle": ["RE-A", "RE-B"]}
+    assert restored.model_dump(mode="json") == {
+        "code": "E-CYCLE",
+        "severity": "E",
+        "id": "RE-A",
+        "message": "cycle",
+        "details": {"cycle": ["RE-A", "RE-B"]},
+    }

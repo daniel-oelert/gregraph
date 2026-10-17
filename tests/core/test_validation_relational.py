@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID
+
+import pytest
 
 from gregraph.core.config import AssetsSection, Config, write_config
 from gregraph.core.git import GitAdapter
@@ -216,6 +219,26 @@ def codes_of(findings: list[Finding]) -> set[str]:
     return {finding.code for finding in findings}
 
 
+def _commit_all(root: Path) -> None:
+    """Commit the current tree (test scaffolding may shell out to git; §12.1)."""
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test Author",
+            "-c",
+            "user.email=test.author@example.org",
+            "commit",
+            "-m",
+            "seed",
+        ],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+
+
 # --------------------------------------------------------------------------
 # composed graph findings (spec §6)
 # --------------------------------------------------------------------------
@@ -382,6 +405,10 @@ class TestLinkFreshness:
             make_document(links=[("relates-to", "RE-BBBBBB", 1)]),
         )
         write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        if (tmp_repo / ".git").exists():
+            # Grace (§3.3) applies only before the first commit: commit the
+            # target once so its later edit is a normal unbumped modification.
+            _commit_all(tmp_repo)
         modified = "# Upload documents\n\nEdited but not yet bumped.\n"
         write_body(tmp_repo / "documents" / "user-stories" / "RE-BBBBBB.md", modified)
         workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
@@ -395,6 +422,82 @@ class TestLinkFreshness:
         else:
             # §7.4: pending-outdated is a Git-mode state only
             assert pending == []
+
+    def test_link_to_uncommitted_v1_target_is_fresh(self, tmp_repo: Path) -> None:
+        """§3.3 rule 4 / AGENT-012: a draft v1 target stays fresh at tv 1."""
+        if not (tmp_repo / ".git").exists():
+            pytest.skip("the initial-grace state is a Git-mode state (§3.3)")
+        setup_repo(tmp_repo)
+        write_doc(
+            tmp_repo,
+            make_document(links=[("relates-to", "RE-BBBBBB", 1)]),
+        )
+        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        modified = "# Upload documents\n\nEdited but not yet bumped.\n"
+        write_body(tmp_repo / "documents" / "user-stories" / "RE-BBBBBB.md", modified)
+        workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+        findings = validate_workspace(workspace)
+        assert findings_with(findings, "W-LINK-PENDING") == []
+        assert findings_with(findings, "E-LINK-VERSION-AHEAD") == []
+
+    def test_link_pending_at_effective_version(self, tmp_repo: Path) -> None:
+        """§5.4/D-AGENT-7/AGENT-026: tv == effective on an unbumped target warns."""
+        setup_repo(tmp_repo)
+        write_doc(
+            tmp_repo,
+            make_document(links=[("relates-to", "RE-BBBBBB", 2)]),
+        )
+        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        if (tmp_repo / ".git").exists():
+            # commit once: the target leaves the grace state (§3.3 rule 5)
+            _commit_all(tmp_repo)
+        modified = "# Upload documents\n\nEdited but not yet bumped.\n"
+        write_body(tmp_repo / "documents" / "user-stories" / "RE-BBBBBB.md", modified)
+        workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+        findings = validate_workspace(workspace)
+        # tv == effective (not merely <= version) is not the ahead error
+        assert findings_with(findings, "E-LINK-VERSION-AHEAD") == []
+        [item] = findings_with(findings, "W-LINK-PENDING")
+        assert item.severity == "W"
+        assert item.subject == "RE-AAAAAA"
+        assert item.fix == "gregraph sync --bump"
+        assert "pending version" in item.message
+
+    def test_link_version_ahead_of_effective(self, tmp_repo: Path) -> None:
+        """§5.4/D-AGENT-7: tv beyond the effective version is the ahead error."""
+        setup_repo(tmp_repo)
+        write_doc(
+            tmp_repo,
+            make_document(links=[("relates-to", "RE-BBBBBB", 3)]),
+        )
+        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        if (tmp_repo / ".git").exists():
+            _commit_all(tmp_repo)
+        modified = "# Upload documents\n\nEdited but not yet bumped.\n"
+        write_body(tmp_repo / "documents" / "user-stories" / "RE-BBBBBB.md", modified)
+        workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+        findings = validate_workspace(workspace)
+        [item] = findings_with(findings, "E-LINK-VERSION-AHEAD")
+        assert item.severity == "E"
+        assert item.subject == "RE-AAAAAA"
+        assert item.fix == "gregraph repair versions"
+        assert findings_with(findings, "W-LINK-PENDING") == []
+
+    def test_link_version_ahead_unmodified_target(self, tmp_repo: Path) -> None:
+        """§5.4: tv = version + 1 on an unmodified target is still ahead."""
+        setup_repo(tmp_repo)
+        write_doc(
+            tmp_repo,
+            make_document(links=[("relates-to", "RE-BBBBBB", 2)]),
+        )
+        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
+        findings = validate_workspace(workspace)
+        [item] = findings_with(findings, "E-LINK-VERSION-AHEAD")
+        assert item.severity == "E"
+        assert item.subject == "RE-AAAAAA"
+        assert item.fix == "gregraph repair versions"
+        assert findings_with(findings, "W-LINK-PENDING") == []
 
     def test_supersedes_chain_is_not_stale(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
@@ -508,7 +611,7 @@ class TestOrphanChecks:
 class TestMentionChecks:
     def test_mention_unlinked(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\nSee RE-BBBBBB for the parent story.\n"
+        body = "# Upload documents\n\nSee [[RE-BBBBBB]] for the parent story.\n"
         write_doc(tmp_repo, make_document(body=body), body=body)
         write_doc(tmp_repo, make_document("RE-BBBBBB"))
         findings = validate_workspace(Workspace.open(tmp_repo))
@@ -519,7 +622,7 @@ class TestMentionChecks:
 
     def test_mention_with_edge_is_silent(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\nSee RE-BBBBBB for the parent story.\n"
+        body = "# Upload documents\n\nSee [[RE-BBBBBB]] for the parent story.\n"
         write_doc(
             tmp_repo,
             make_document(body=body, links=[("relates-to", "RE-BBBBBB", 1)]),
@@ -531,7 +634,7 @@ class TestMentionChecks:
 
     def test_mention_unknown(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\nSee RE-ZZZZZZ for the parent story.\n"
+        body = "# Upload documents\n\nSee [[RE-ZZZZZZ]] for the parent story.\n"
         write_doc(tmp_repo, make_document(body=body), body=body)
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-MENTION-UNKNOWN")
@@ -542,12 +645,34 @@ class TestMentionChecks:
     def test_cr_ids_are_exempt(self, tmp_repo: Path) -> None:
         # §5.2: document bodies may mention CR IDs freely
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\nSee RE-DDDDDD for the change request.\n"
+        body = "# Upload documents\n\nSee [[RE-DDDDDD]] for the change request.\n"
         write_doc(tmp_repo, make_document(body=body), body=body)
         write_change(tmp_repo, make_change("RE-DDDDDD"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "W-MENTION-UNLINKED") == []
         assert findings_with(findings, "E-MENTION-UNKNOWN") == []
+
+    def test_bare_id_and_hyphenated_words_produce_no_mention_findings(
+        self, tmp_repo: Path
+    ) -> None:
+        """AGENT-402/D-AGENT-6: bare IDs and hyphenated prose are not mentions."""
+        setup_repo(tmp_repo)
+        body = (
+            "# Upload documents\n"
+            "\n"
+            "The multi-target and baseline-branch designs see RE-BBBBBB.\n"
+        )
+        write_doc(tmp_repo, make_document(body=body), body=body)
+        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        findings = validate_workspace(Workspace.open(tmp_repo))
+        assert findings_with(findings, "W-MENTION-UNLINKED") == []
+        assert findings_with(findings, "E-MENTION-UNKNOWN") == []
+        # The explicit wikilink form still is a mention.
+        explicit = "# Upload documents\n\nSee [[RE-BBBBBB]] for details.\n"
+        write_doc(tmp_repo, make_document(body=explicit), body=explicit)
+        findings = validate_workspace(Workspace.open(tmp_repo))
+        [item] = findings_with(findings, "W-MENTION-UNLINKED")
+        assert item.subject == "RE-AAAAAA"
 
 
 # --------------------------------------------------------------------------

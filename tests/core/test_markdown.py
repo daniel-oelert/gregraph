@@ -182,18 +182,48 @@ def test_find_section_by_renamed_heading() -> None:
     assert find_section(sections, "Notes") is None
 
 
-def test_find_mentions_bare_id() -> None:
-    mentions = find_mentions("See RE-7F3K2Q for details.", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "bare")]
+def test_find_mentions_wikilink() -> None:
+    mentions = find_mentions("See [[RE-7F3K2Q]] for details.", doc_path=DOC)
+    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
 
 
-def test_find_mentions_case_insensitive_normalised() -> None:
-    mentions = find_mentions("see re-7f3k2q now", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "bare")]
+def test_find_mentions_wikilink_with_label() -> None:
+    mentions = find_mentions("See [[RE-7F3K2Q|Custom label]] here.", doc_path=DOC)
+    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+
+
+def test_find_mentions_wikilink_label_boundaries() -> None:
+    # empty label is not a wikilink; the label may hold any other non-] text
+    assert find_mentions("[[RE-7F3K2Q|]]", doc_path=DOC) == []
+    assert find_mentions("[[RE-7F3K2Q|label] more]]", doc_path=DOC) == []
+
+
+def test_find_mentions_wikilink_case_sensitive() -> None:
+    assert find_mentions("[[re-7f3k2q]]", doc_path=DOC) == []
+    assert find_mentions("[[Re-7F3K2Q]]", doc_path=DOC) == []
+
+
+def test_find_mentions_wikilink_rejects_malformed_ids() -> None:
+    for body in ("[[RE-7F3K2]]", "[[RE-7F3K2QX]]", "[[RE-7F3K2I]]", "[[RE-7F3K2U]]"):
+        assert find_mentions(body, doc_path=DOC) == []
+
+
+def test_find_mentions_bare_id_is_prose() -> None:
+    assert find_mentions("See RE-7F3K2Q for details.", doc_path=DOC) == []
+
+
+def test_find_mentions_hyphenated_words_are_prose() -> None:
+    body = "The multi-target and baseline-branch and system-design checks."
+    assert find_mentions(body, doc_path=DOC) == []
+
+
+def test_find_mentions_lowercase_prose_and_href() -> None:
+    assert find_mentions("see re-7f3k2q now", doc_path=DOC) == []
+    assert find_mentions("[x](../features/re-2k7qmb.md)", doc_path=DOC) == []
 
 
 def test_find_mentions_prefix_length_variants() -> None:
-    body = "A-7F3K2Q AB-7F3K2Q ABCDEF-7F3K2Q"
+    body = "[[A-7F3K2Q]] [[AB-7F3K2Q]] [[ABCDEF-7F3K2Q]]"
     assert [m.id for m in find_mentions(body, doc_path=DOC)] == [
         "A-7F3K2Q",
         "AB-7F3K2Q",
@@ -204,6 +234,20 @@ def test_find_mentions_prefix_length_variants() -> None:
 def test_find_mentions_ignores_code_span_and_fence() -> None:
     assert find_mentions("`RE-7F3K2Q`", doc_path=DOC) == []
     assert find_mentions("```\nRE-7F3K2Q\n```\n", doc_path=DOC) == []
+    assert find_mentions("`[[RE-7F3K2Q]]`", doc_path=DOC) == []
+    assert find_mentions("```\n[[RE-7F3K2Q]]\n```\n", doc_path=DOC) == []
+
+
+def test_find_mentions_ignores_html() -> None:
+    assert find_mentions("<!-- [[RE-7F3K2Q]] -->", doc_path=DOC) == []
+    assert find_mentions("a <!-- [[RE-7F3K2Q]] --> b", doc_path=DOC) == []
+    assert find_mentions("<div>\n[[RE-7F3K2Q]]\n</div>\n", doc_path=DOC) == []
+    assert find_mentions("<b>[[RE-7F3K2Q]]</b>", doc_path=DOC) == []
+
+
+def test_find_mentions_wikilink_outside_html_tags() -> None:
+    mentions = find_mentions("<b>bold</b> [[RE-7F3K2Q]]", doc_path=DOC)
+    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
 
 
 def test_find_mentions_markdown_link_to_id() -> None:
@@ -211,26 +255,66 @@ def test_find_mentions_markdown_link_to_id() -> None:
     assert mentions == [Mention("RE-2K7QMB", "link")]
 
 
+def test_find_mentions_link_target_is_id() -> None:
+    mentions = find_mentions("[see this](RE-7F3K2Q)", doc_path=DOC)
+    assert mentions == [Mention("RE-7F3K2Q", "link")]
+
+
+def test_find_mentions_link_text_is_id() -> None:
+    mentions = find_mentions("[RE-7F3K2Q](https://example.com/spec)", doc_path=DOC)
+    assert mentions == [Mention("RE-7F3K2Q", "link")]
+
+
 def test_find_mentions_link_text_and_href() -> None:
     body = "[RE-7F3K2Q](../features/RE-2K7QMB.md)"
     assert set(find_mentions(body, doc_path=DOC)) == {
-        Mention("RE-7F3K2Q", "bare"),
+        Mention("RE-7F3K2Q", "link"),
         Mention("RE-2K7QMB", "link"),
     }
 
 
-def test_find_mentions_link_href_lowercase() -> None:
-    body = "[see](../features/re-2k7qmb.md)"
-    assert find_mentions(body, doc_path=DOC) == [Mention("RE-2K7QMB", "link")]
+def test_find_mentions_link_relative_md_path_without_dotdot() -> None:
+    mentions = find_mentions("[x](RE-7F3K2Q.md)", doc_path=DOC)
+    assert mentions == [Mention("RE-7F3K2Q", "link")]
+
+
+def test_find_mentions_wikilink_inside_markdown_link() -> None:
+    # spec §5.2: ``[[RE-…]](x)`` — the wikilink counts, the target ``x`` does not
+    mentions = find_mentions("[[RE-7F3K2Q]](x)", doc_path=DOC)
+    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+
+
+def test_find_mentions_wikilink_with_label_inside_markdown_link() -> None:
+    mentions = find_mentions("[[RE-7F3K2Q|label]](x)", doc_path=DOC)
+    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+
+
+def test_find_mentions_link_text_with_inner_wikilink() -> None:
+    mentions = find_mentions("[see [[RE-7F3K2Q]] info](x)", doc_path=DOC)
+    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+
+
+def test_find_mentions_code_span_in_link_text_is_ignored() -> None:
+    assert find_mentions("[`RE-7F3K2Q`](x)", doc_path=DOC) == []
 
 
 def test_find_mentions_deduplicates() -> None:
-    body = "RE-7F3K2Q and RE-7F3K2Q again"
-    assert find_mentions(body, doc_path=DOC) == [Mention("RE-7F3K2Q", "bare")]
+    body = "[[RE-7F3K2Q]] and [[RE-7F3K2Q|again]]"
+    assert find_mentions(body, doc_path=DOC) == [Mention("RE-7F3K2Q", "wikilink")]
+    body = "[RE-7F3K2Q](RE-7F3K2Q)"
+    assert find_mentions(body, doc_path=DOC) == [Mention("RE-7F3K2Q", "link")]
+
+
+def test_find_mentions_distinguishes_via() -> None:
+    body = "[[RE-7F3K2Q]] and [RE-7F3K2Q](x)"
+    assert find_mentions(body, doc_path=DOC) == [
+        Mention("RE-7F3K2Q", "wikilink"),
+        Mention("RE-7F3K2Q", "link"),
+    ]
 
 
 def test_find_mentions_returns_cr_ids_raw() -> None:
-    body = "RE-3M9XA1 and RE-7F3K2Q"
+    body = "[[RE-3M9XA1]] and [[RE-7F3K2Q]]"
     assert [m.id for m in find_mentions(body, doc_path=DOC)] == [
         "RE-3M9XA1",
         "RE-7F3K2Q",
@@ -239,6 +323,12 @@ def test_find_mentions_returns_cr_ids_raw() -> None:
 
 def test_find_mentions_image_assets_do_not_mention() -> None:
     body = "![a](../../assets/RE-7F3K2Q/f.png) and [d](../../assets/RE-2K7QMB/g.png)"
+    assert find_mentions(body, doc_path=DOC) == []
+
+
+def test_find_mentions_asset_target_excludes_id_text() -> None:
+    # asset links are never mentions, even when the link text is an ID (§5.2)
+    body = "[RE-7F3K2Q](../../assets/RE-7F3K2Q/g.png)"
     assert find_mentions(body, doc_path=DOC) == []
 
 
@@ -252,18 +342,23 @@ def test_find_mentions_rejects_non_ids() -> None:
 
 
 def test_find_mentions_boundaries() -> None:
-    body = "(RE-7F3K2Q) and RE-7F3K2Q.md"
-    assert find_mentions(body, doc_path=DOC) == [Mention("RE-7F3K2Q", "bare")]
+    body = "([[RE-7F3K2Q]]) and [[RE-7F3K2Q|note]] and [x](RE-7F3K2Q)"
+    mentions = find_mentions(body, doc_path=DOC)
+    assert [m.id for m in mentions] == ["RE-7F3K2Q", "RE-7F3K2Q"]
+    assert mentions[0].via == "wikilink"
+    assert mentions[1].via == "link"
 
 
-def test_find_mentions_glued_word_is_raw_match() -> None:
+def test_find_mentions_glued_word_is_prose() -> None:
     body = "seeRE-7F3K2Q"
-    assert find_mentions(body, doc_path=DOC) == [Mention("SEERE-7F3K2Q", "bare")]
+    assert find_mentions(body, doc_path=DOC) == []
 
 
 def test_find_mentions_in_heading() -> None:
     body = "## See RE-7F3K2Q\n\ntext\n"
-    assert [m.id for m in find_mentions(body, doc_path=DOC)] == ["RE-7F3K2Q"]
+    assert find_mentions(body, doc_path=DOC) == []
+    body = "## See [[RE-7F3K2Q]]\n\ntext\n"
+    assert find_mentions(body, doc_path=DOC) == [Mention("RE-7F3K2Q", "wikilink")]
 
 
 def test_resolve_asset_ref_own_folder() -> None:

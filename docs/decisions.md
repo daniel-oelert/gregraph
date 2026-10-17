@@ -299,3 +299,161 @@ rendering are excluded. Remote or multi-user use is unsupported.
 written. CI also runs `mypy --strict -p gregraph -p gregraph.cli -p gregraph.webui`,
 because the shared namespace is not reached through `-p gregraph` alone for the
 optional packages. Packaging is checked by `tests/packaging_check.py`.
+
+**D-AGENT-1 … D-AGENT-9 (agent readiness).** Recorded from
+`AGENT_READINESS.md` (Amendment A2 to `docs/design.md`,
+revision 0.4, confirmed by the project owner 2026-10-15). The amendment
+makes the tool agent-*ready* rather than agent-*tolerated*: a coding agent
+must be able to create, link, validate and read requirements through the CLI
+without reading tool documentation, configuration files or source code, and
+every interaction must be observable in exactly one parseable stream. The
+nine decisions below are the resolved choices; each is restated here with
+its reasoning in the style of the other entries. No new runtime dependency,
+no server, no daemon: the whole change lives inside the existing dependency
+footprint (D11) and leaves the optional web UI untouched.
+
+### D-AGENT-1 (integration model)
+
+An agent integrates with GREGraph through the local CLI and the core library
+only — no MCP server, no LSP, no daemon, no watch mode, no network service
+(§1.2, §21.3 stay authoritative). Agent readiness is delivered by six
+capabilities instead: (a) a complete `--json` contract (D-AGENT-2), (b)
+template-aware authoring plus the uncommitted-`v1` grace period
+(D-AGENT-3/D-AGENT-4), (c) schema and rule introspection (D-AGENT-5), (d)
+explicit prose mention syntax plus the freshness fix (D-AGENT-6/D-AGENT-7),
+(e) single-call context packing (D-AGENT-8), and (f) automatic
+`AGENTS.md`/`.agents/skills/gregraph/SKILL.md` scaffolding (D-AGENT-9).
+Consequence: `--help`/`--version` remain plain-text argparse output; agents
+discover the command surface via `gregraph schema --json` instead.
+
+### D-AGENT-2 (universal `--json` contract)
+
+Every command and subcommand accepts `--json` (the lifecycle exception
+`serve` accepts and ignores it, §21.3). With `--json`, stdout carries
+exactly one canonical JSON document and stderr is empty for exit codes
+0–4 (exit 5 suppresses its traceback unless `GREGRAPH_DEBUG=1` is set — a
+debugging escape hatch, not part of the contract). Exit 1 documents are
+result-shaped (`validate` findings array, `check`/`hook pre-commit`
+payloads); exits 2/3/4/5 produce one error envelope
+`{"error": {code, exit_code, message, finding, details}}` on stdout, whose
+`code` is the protocol code `E-USAGE`/`E-NO-REPOSITORY`/`E-ENV`/the refusal
+code/`E-INTERNAL`. These protocol codes live only in the envelope — they are
+not added to the §14 catalogue and never appear as findings. Warnings and
+degraded-mode notes travel inside the payload as `notices`/`findings` arrays
+instead of stderr lines; `--json` takes precedence over `--quiet`;
+`--edit` and `--json` are mutually exclusive (exit 2). Consequence: an agent
+parses one stream and never interleaves; human mode is unchanged.
+
+### D-AGENT-3 (rich `new --json`, uncommitted-`v1` grace)
+
+`new --json` returns a rich authoring payload — `md_path`, the body exactly
+as written on disk, the template `sections` spec (heading, required,
+placeholder, renamed_from) and the parsed sidecar — so the file-first
+workflow (agent creates with `new --json`, then edits `md_path` with its
+native Edit tool) needs no template lookup. On top of that, an item at
+`version == 1` that is absent from Git `HEAD` is in the *initial-grace
+state*: reconcile populates it in place (`version` stays `1`; hashes, title
+and assets are refreshed), and its `effective_version` is `1`, so links
+recorded against the uncommitted draft stay fresh across the initial
+commit. This kills the "skeleton `v1` → real content lands as fake `v2`"
+trap of the first hook commit. Degraded mode has no grace period (`sync` is
+the versioning act there and bumps as before).
+
+### D-AGENT-4 (template-guided authoring flags)
+
+`new`, `supersede`, `cr new`, `term add` and `edit` accept
+`--section "<Heading>=<Content>"`/`--section-file "<Heading>=<PATH|->"`
+(per-section assembly; `new`/`supersede`/`edit` additionally accept the
+whole-body pair `--body`/`--body-file`), plus `--strict` to refuse
+empty-or-placeholder required sections at write time. Precedence: whole
+body > sections > skeleton; headings are matched against the pinned
+template exactly, trimmed and case-sensitive (`heading` first, then
+`renamed_from`); sections assemble in canonical template order. Refusals
+are self-describing: `E-SECTION-UNKNOWN` carries the full
+`details.template_sections` (plus `given_heading`), the write-time
+`E-SECTION-REQUIRED-EMPTY` carries `template_sections` and
+`missing_required` — the next call can succeed without a template lookup.
+Nothing is written on refusal. On `edit` (which has no `--title` flag) the
+body's H1 is the title authority: a supplied whole body whose first
+non-blank line is a level-1 heading is stored as sent and the sidecar
+`title` is synchronised to it (`update_body` step 5, AGENT_READINESS §3.4
+rule 8), while a whole body without an H1 gets the existing document title
+prepended as `# <title>`. The `--section` required-section check runs on
+the assembled body, so unmentioned required sections already filled on disk
+are preserved verbatim (AGENT-016) and only empty-or-placeholder required
+sections in the assembled body refuse `E-SECTION-REQUIRED-EMPTY`.
+Consequence: CLI-first and file-first
+authoring are equally first-class and equally versioned.
+
+### D-AGENT-5 (self-discovery)
+
+`gregraph schema [--type TYPE] [--json]` exposes the whole rulebook in one
+call (config policies, types with kinds and templates, the five kinds, the
+nine edge rules with their §6.1 guidance, active templates with sections,
+the CR lifecycle); `template show --json` adds the resolved `sections` and
+the template file's `path`; `link --candidates SOURCE [--type T]` exposes
+the interactive picker's filtering (kind rule, target liveness, cycle
+pre-exclusion) as data. Consequence: an agent never reads `config.toml`,
+template JSON files or tool source to learn the rules, and never discovers
+them by trial-and-error refusals.
+
+### D-AGENT-6 (explicit mention syntax only)
+
+Prose mentions are recognised **only** in explicit reference syntax:
+`[[ID]]`, `[[ID|label]]`, or a Markdown link whose target matches the ID
+pattern, resolves to a managed `.md` path whose stem matches it, or whose
+link text matches it — case-sensitive canonical uppercase; bare ID-shaped
+tokens in prose are never mentions, and code spans, fenced code and HTML
+are excluded. This resolves the dogfooding false positives where
+hyphenated prose ("multi-target", "baseline-branch") fired
+`E-MENTION-UNKNOWN` and blocked commits. Consequence: validation is
+trustworthy because it never fires on ordinary prose; repositories seeded
+with bare-ID mentions lose those mentions (coverage shrinks to explicit
+references) and must be re-checked on upgrade. `term usage` is unaffected
+(name/alias matching, not ID matching).
+
+### D-AGENT-7 (freshness against the effective version)
+
+`E-LINK-VERSION-AHEAD` is measured against the target's **effective**
+version, not the stored one: `target_version == effective_version` on a
+target with unbumped modifications is the existing warning
+`W-LINK-PENDING` (fix `gregraph sync --bump`), and only
+`target_version > effective_version` is the error. This resolves the
+long-standing contradiction where `link`/`link refresh` legitimately
+recorded `version + 1` against an unbumped target and `validate` then
+flagged the very state the tool had just created. With D-AGENT-3 the
+effective version of an uncommitted `v1` draft is `1`, so the seeding-time
+variant disappears as well; `W-LINK-PENDING` is suppressed for
+initial-grace targets. Consequence: `validate` and `check`/`hook
+pre-commit` agree on the same tree, and the hook's ad-hoc suppression of
+these false positives becomes redundant.
+
+### D-AGENT-8 (context packing)
+
+`gregraph context <ID…> [--depth N] [--direction …]
+[--include-terms|--no-include-terms]` packs one call with everything
+needed to implement against the requested documents and CRs: full target
+payloads with bodies and parsed sections, BFS neighbours with the
+connecting edge, direction, depth and freshness state, glossary terms
+occurring in the bundle bodies, and the findings affecting the bundle.
+Supporting conveniences: `show` accepts multiple IDs (JSON array under
+`--json`, `---`-separated in human mode; single-ID output unchanged) and
+`list --body` adds full Markdown bodies to the `list --json` items.
+Consequence: a ten-document context costs one tool call with freshness
+attached, not ten `show` calls plus manual link chasing and glossary
+lookup.
+
+### D-AGENT-9 (agent scaffolding)
+
+`gregraph init` writes `AGENTS.md` (a delimited managed block, following
+the pre-commit hook's managed-block pattern: existing content preserved,
+block appended or replaced in place, idempotent) and
+`.agents/skills/gregraph/SKILL.md` (wholly tool-owned, rewritten only when
+its content differs, the one file allowed YAML front matter). `repair
+agents` rewrites both on demand and `sync` refreshes them as its last
+step, so the instructions heal after a tool upgrade or config change.
+Both files are static text generated in `core/agents.py` — never imported
+or parsed by the tool. Consequence: every new agent session reads the
+golden rules from the repository instead of re-deriving (or violating)
+them; `hooks install` deliberately does not touch agent files (single
+responsibility).

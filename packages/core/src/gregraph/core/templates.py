@@ -20,16 +20,34 @@ from typing import Literal
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
-from gregraph.core.markdown import parse_sections, strip_html_comments
-from gregraph.core.models import Finding, TemplateDescriptor, TemplateSection
+from gregraph.core.markdown import (
+    Section,
+    find_section,
+    heading_matches,
+    parse_sections,
+    section_is_empty,
+    strip_html_comments,
+)
+from gregraph.core.models import (
+    Finding,
+    OperationRefused,
+    TemplateDescriptor,
+    TemplateSection,
+)
 
 __all__ = [
     "LoadedTemplate",
     "MigrationPlan",
+    "assemble_sections",
     "check_deprecated",
+    "check_required_sections",
+    "is_section_unfilled",
     "load_template_dir",
+    "match_template_section",
     "plan_migration",
+    "prepare_whole_body",
     "render_template",
+    "resolve_section_inputs",
     "resolve_template",
     "sections_hash",
 ]
@@ -442,3 +460,267 @@ def _plan_superseding(
         unmapped=unmapped,
         manual_attention=manual,
     )
+
+
+# --------------------------------------------------------------------------
+# agent authoring: template-guided sections and whole-body (§3.4)
+# --------------------------------------------------------------------------
+
+
+def is_section_unfilled(content: str, placeholder: str = "") -> bool:
+    """Whether section ``content`` is empty or only its placeholder (§5.5).
+
+    Skeletons wrap the descriptor placeholder in emphasis (``*…*``), so the
+    bare, italic and bold spellings all count as untouched — the same rule
+    as ``validation._is_unfilled`` and ``changes._is_unfilled``.
+    """
+    if section_is_empty(content, placeholder):
+        return True
+    stripped = placeholder.strip()
+    if not stripped:
+        return False
+    return section_is_empty(content, f"*{stripped}*") or section_is_empty(
+        content, f"**{stripped}**"
+    )
+
+
+def match_template_section(
+    descriptor: TemplateDescriptor, given_heading: str
+) -> TemplateSection:
+    """Resolve one ``--section`` heading to its template section (§3.4 rule 2).
+
+    Exact, trimmed, case-sensitive: ``heading`` first, then any
+    ``renamed_from`` alias; if a heading could match two template sections,
+    the first match in template order wins.  Raises ``OperationRefused``
+    (``E-SECTION-UNKNOWN``) with the full section specification in
+    ``details`` so an agent can self-correct without a template lookup
+    (AGENT-017, appendix C).
+    """
+    given = given_heading.strip()
+    for section in descriptor.sections:
+        if given == section.heading.strip():
+            return section
+    for section in descriptor.sections:
+        if any(given == alt.strip() for alt in section.renamed_from):
+            return section
+    raise OperationRefused(
+        Finding(
+            code="E-SECTION-UNKNOWN",
+            severity="E",
+            subject=f"{descriptor.name}/v{descriptor.version}",
+            message=(
+                f"section {given_heading!r} is not a section of template "
+                f"{descriptor.name!r} v{descriptor.version} "
+                "(exact, case-sensitive; see details.template_sections)"
+            ),
+            details={
+                "given_heading": given_heading,
+                "template": {"name": descriptor.name, "version": descriptor.version},
+                "template_sections": [
+                    sec.model_dump(mode="json") for sec in descriptor.sections
+                ],
+            },
+        )
+    )
+
+
+def resolve_section_inputs(
+    descriptor: TemplateDescriptor, entries: Sequence[tuple[str, str]]
+) -> dict[str, str]:
+    """Resolve ``(given_heading, content)`` pairs to canonical headings.
+
+    Each heading goes through :func:`match_template_section`; two entries
+    resolving to the same canonical heading raise ``ValueError`` — the CLI
+    maps that to a usage error (exit 2); content is never silently merged
+    (AGENT_READINESS §3.4 rule 1).  Contents are LF-normalised.
+    """
+    resolved: dict[str, str] = {}
+    for given_heading, entry_content in entries:
+        section = match_template_section(descriptor, given_heading)
+        if section.heading in resolved:
+            raise ValueError(f"duplicate section heading {section.heading!r}")
+        resolved[section.heading] = entry_content.replace("\r\n", "\n").replace(
+            "\r", "\n"
+        )
+    return resolved
+
+
+def _is_atx_h1(line: str) -> bool:
+    """Whether ``line`` is an ATX level-1 heading (AGENT_READINESS §3.4 rule 4)."""
+    return line == "#" or line.startswith("# ") or line.startswith("#\t")
+
+
+def _placeholder_block(section: TemplateSection) -> str:
+    """Level-2 block for an unmentioned section: heading plus placeholder."""
+    if section.placeholder:
+        return f"## {section.heading}\n\n*{section.placeholder}*"
+    return f"## {section.heading}"
+
+
+def _body_preamble(base_body: str) -> str:
+    """``base_body``'s text between the H1 line and the first ``##`` heading.
+
+    Content before the first level-2 heading (rare) is preserved before the
+    first assembled section on edits (AGENT_READINESS §3.4 rule 3); the H1
+    line itself is not part of it — the assembled body starts with the
+    canonical ``# {title}`` line.
+    """
+    preamble, _sections = _split_body(base_body)
+    lines = preamble.split("\n")
+    for index, line in enumerate(lines):
+        if line.strip():
+            if _is_atx_h1(line.lstrip()):
+                lines = lines[index + 1 :]
+            break
+    return "\n".join(lines).strip()
+
+
+def assemble_sections(
+    descriptor: TemplateDescriptor,
+    *,
+    title: str,
+    content: Mapping[str, str],
+    base_body: str | None = None,
+    preserve_existing: bool = False,
+) -> str:
+    """Assemble a full body in canonical template order (§3.4 rule 3, AGENT-015).
+
+    ``# {title}`` first, then one level-2 block per section of
+    ``descriptor.sections``.  Sections provided in ``content`` win.  With
+    ``preserve_existing`` (``edit``, ``supersede --copy-body``) unmentioned
+    sections keep their ``base_body`` content verbatim and extra level-2
+    sections unknown to the template are kept at the end (AGENT-016);
+    otherwise unmentioned sections emit the template placeholder.  Prose
+    between the H1 and the first ``##`` heading is preserved before the
+    first section on edits.
+    """
+    blocks: list[str] = [f"# {title}"]
+    base_sections: list[Section] = []
+    if base_body is not None:
+        base_sections = parse_sections(base_body)
+        if preserve_existing:
+            preamble = _body_preamble(base_body)
+            if preamble:
+                blocks.append(preamble)
+    for section in descriptor.sections:
+        if section.heading in content:
+            value = content[section.heading].strip("\n")
+            if value:
+                blocks.append(f"## {section.heading}\n\n{value}")
+            else:
+                blocks.append(f"## {section.heading}")
+            continue
+        existing = find_section(base_sections, section.heading, section.renamed_from)
+        if preserve_existing:
+            if existing is None:
+                blocks.append(_placeholder_block(section))
+            else:
+                # Verbatim content; only block-boundary newlines are trimmed —
+                # the ``"\n\n"`` join re-supplies the section separator, which
+                # keeps repeated edits idempotent (AGENT-016).
+                blocks.append(f"## {section.heading}\n{existing.content}".rstrip("\n"))
+        elif (
+            base_body is not None
+            and existing is not None
+            and existing.content.strip("\n")
+        ):
+            blocks.append(f"## {section.heading}\n\n{existing.content.strip(chr(10))}")
+        else:
+            blocks.append(_placeholder_block(section))
+    if preserve_existing and base_body is not None:
+        for extra in base_sections:
+            if not any(
+                heading_matches(extra.heading, sec.heading, sec.renamed_from)
+                for sec in descriptor.sections
+            ):
+                blocks.append(f"## {extra.heading}\n{extra.content}".rstrip("\n"))
+    return "\n\n".join(blocks).rstrip("\n") + "\n"
+
+
+def check_required_sections(
+    descriptor: TemplateDescriptor,
+    body: str,
+    *,
+    provided_headings: set[str] | None = None,
+    require_provided: bool = False,
+    subject: str | None = None,
+) -> None:
+    """Refuse when a template-required section is missing or empty (AGENT-018).
+
+    AGENT_READINESS §3.4 rules 5–6.  With ``require_provided`` (``--section*``
+    authoring) a required section without a provided entry is a refusal; the
+    body check still applies to the entries that were provided.  Without it
+    (``--strict``) every required section must be filled in the assembled
+    ``body`` — empty, whitespace-only, HTML-comment-only or placeholder-only
+    counts as unfilled (:func:`is_section_unfilled`).  Raises
+    ``OperationRefused`` (``E-SECTION-REQUIRED-EMPTY``) and writes nothing;
+    ``details`` carries ``missing_required`` plus the template's section
+    specification so agents can self-correct.
+    """
+    sections = parse_sections(body)
+    missing: list[str] = []
+    for section in descriptor.sections:
+        if not section.required:
+            continue
+        if (
+            require_provided
+            and provided_headings is not None
+            and section.heading not in provided_headings
+        ):
+            missing.append(section.heading)
+            continue
+        found = find_section(sections, section.heading, section.renamed_from)
+        if found is None or is_section_unfilled(found.content, section.placeholder):
+            missing.append(section.heading)
+    if not missing:
+        return
+    raise OperationRefused(
+        Finding(
+            code="E-SECTION-REQUIRED-EMPTY",
+            severity="E",
+            subject=subject or f"{descriptor.name}/v{descriptor.version}",
+            message=(
+                f"required section(s) {', '.join(repr(h) for h in missing)} "
+                f"of template {descriptor.name!r} v{descriptor.version} "
+                "are missing or empty"
+            ),
+            details={
+                "missing_required": missing,
+                "template": {"name": descriptor.name, "version": descriptor.version},
+                "template_sections": [
+                    sec.model_dump(mode="json") for sec in descriptor.sections
+                ],
+            },
+        )
+    )
+
+
+def prepare_whole_body(raw_body: str, *, title: str) -> tuple[str, list[str]]:
+    """Prepare whole-body input for ``--body``/``--body-file`` (AGENT-019).
+
+    AGENT_READINESS §3.4 rule 4.  LF normalisation only — the prose is stored
+    as sent (§21.5 step 4).  The tool owns the H1 (§5.6): when the first
+    non-blank line is an ATX level-1 heading it is replaced by ``# {title}``
+    — with a notice when the heading text differed — otherwise ``# {title}``
+    is prepended.  The returned text always ends with a newline.
+    """
+    text = raw_body.replace("\r\n", "\n").replace("\r", "\n")
+    notices: list[str] = []
+    lines = text.split("\n")
+    first = -1
+    for index, line in enumerate(lines):
+        if line.strip():
+            first = index
+            break
+    if first >= 0 and _is_atx_h1(lines[first]):
+        old_title = lines[first][1:].strip()
+        lines[first] = f"# {title}"
+        if old_title != title:
+            notices.append(f"replaced H1 {old_title!r} with {title!r}")
+        body = "\n".join(lines)
+    else:
+        rest = text.lstrip("\n")
+        body = f"# {title}\n\n{rest}" if rest else f"# {title}\n"
+    if not body.endswith("\n"):
+        body = f"{body}\n"
+    return body, notices

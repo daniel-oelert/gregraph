@@ -676,8 +676,31 @@ def _unbumped_ids(ctx: ValidationContext) -> set[str]:
     return result
 
 
+def _grace_ids(ctx: ValidationContext) -> set[str]:
+    """Document IDs in the initial-grace state (spec §3.3, AGENT-012).
+
+    A ``v1`` document absent from Git ``HEAD`` — untracked or
+    staged-but-uncommitted — is being populated: its effective version stays
+    ``1`` and links into it are not pending (§3.3 rules 3–4).  Degraded mode
+    has no commit step, hence no grace period (AGENT-014).  A missing body
+    file is ``E-BODY-MISSING``, not a grace case.
+    """
+    if not ctx.workspace.git.is_repo():
+        return set()
+    result: set[str] = set()
+    for doc_id, loaded in ctx.workspace.index.documents.items():
+        body = loaded.body
+        if (
+            loaded.model.version == 1
+            and (ctx.workspace.root / body).is_file()
+            and ctx.workspace.git.file_at("HEAD", body) is None
+        ):
+            result.add(doc_id)
+    return result
+
+
 def check_link_freshness(ctx: ValidationContext, out: FindingCollector) -> None:
-    """Link freshness of spec §7.4 over the document graph.
+    """Link freshness of spec §7.4 over the document graph (§3.3, §5.4).
 
     Codes: ``E-LINK-VERSION-AHEAD``, ``W-LINK-OUTDATED``, ``W-LINK-STALE``,
     ``W-LINK-PENDING``. Composes ``versioning.freshness_table`` and maps its
@@ -685,11 +708,15 @@ def check_link_freshness(ctx: ValidationContext, out: FindingCollector) -> None:
     version) warn on every link except ``supersedes`` (a supersession edge
     *is* the supersession — §7.6 "OLD's inbound links… become stale" refers to
     links that predate it, and ``link refresh --follow`` must not re-point a
-    chain onto its own successor); ``target_version > target.version`` is the
-    unconditional ``E-LINK-VERSION-AHEAD`` invariant (even when also stale);
-    ``target_version < target.version`` warns ``W-LINK-OUTDATED``; a fresh
-    link whose target has unbumped modifications is ``W-LINK-PENDING`` (§7.4:
-    pending-outdated is a Git-mode state, gated on ``git.is_repo()``).
+    chain onto its own successor); ``target_version > effective_version`` is
+    the ``E-LINK-VERSION-AHEAD`` invariant (D-AGENT-7: the *effective*
+    version, so a link refreshed to ``version + 1`` against an unbumped
+    target is not an error); ``target_version < target.version`` warns
+    ``W-LINK-OUTDATED``; a link matching the pending version of an unbumped
+    target or fresh against one warns ``W-LINK-PENDING`` (§7.4:
+    pending-outdated is a Git-mode state, gated on ``git.is_repo()``), except
+    that a target in the initial-grace state (uncommitted ``v1``, §3.3) is
+    never pending — a draft being populated is fresh.
     """
     index = ctx.workspace.index
     graph = ctx.workspace.graph
@@ -699,15 +726,21 @@ def check_link_freshness(ctx: ValidationContext, out: FindingCollector) -> None:
         for doc_id, loaded in documents.items()
     }
     unbumped = {doc_id: True for doc_id in _unbumped_ids(ctx)}
+    grace = {doc_id: True for doc_id in _grace_ids(ctx)}
     triples: list[tuple[str, Link, Document | None]] = []
     for doc_id, loaded in sorted(documents.items()):
         for link in loaded.model.links:
             target = documents.get(link.target)
             triples.append((doc_id, link, target.model if target else None))
-    table = freshness_table(triples, deprecated_or_superseded=dead, unbumped=unbumped)
+    table = freshness_table(
+        triples,
+        deprecated_or_superseded=dead,
+        unbumped=unbumped,
+        in_grace=grace,
+    )
     git_mode = ctx.workspace.git.is_repo()
     for entry in table.entries:
-        ahead = entry.link_target_version > entry.target_version
+        ahead = entry.link_target_version > entry.effective
         if ahead:
             out.add(
                 "E-LINK-VERSION-AHEAD",
@@ -743,6 +776,20 @@ def check_link_freshness(ctx: ValidationContext, out: FindingCollector) -> None:
                 f"{entry.link_target_version} is below the target's version "
                 f"{entry.target_version}",
                 fix=refresh,
+            )
+        elif (
+            entry.link_target_version == entry.effective
+            and entry.effective > entry.target_version
+        ):
+            # §5.4/D-AGENT-7/AGENT-026: the link holds the target's pending
+            # version — the state a refresh just created, not a mishap.
+            out.add(
+                "W-LINK-PENDING",
+                entry.source,
+                f"link {entry.type} → {entry.target}: target_version "
+                f"{entry.link_target_version} matches target's pending "
+                "version; target has unbumped modifications",
+                fix="gregraph sync --bump",
             )
         elif entry.state == "pending-outdated" and git_mode:
             out.add(

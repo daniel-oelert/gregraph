@@ -20,6 +20,7 @@ from gregraph.cli.output import (
     canonical_json,
     colour_enabled,
     document_payload,
+    error_envelope,
     format_finding,
     format_table,
 )
@@ -282,3 +283,127 @@ def test_line_still_suppressed_when_quiet_after_announce() -> None:
     handle, out, _ = output_pair(quiet=True)
     handle.line("ordinary")
     assert out.getvalue() == ""
+
+
+# --------------------------------------------------------------------------
+# JSON contract (AGENT_READINESS §2.1 R3/R4) and error envelopes (§2.2)
+# --------------------------------------------------------------------------
+
+
+def test_json_mode_suppresses_stderr_warn_note_finding() -> None:
+    handle, out, err = output_pair(json_mode=True)
+    handle.warn("degraded mode")
+    handle.note("no git identity")
+    handle.finding(
+        Finding(code="E-CYCLE", severity="E", subject="RE-1", message="cycle")
+    )
+    assert err.getvalue() == ""
+    assert out.getvalue() == ""
+
+
+def test_json_writes_stdout_even_when_quiet() -> None:
+    handle, out, err = output_pair(json_mode=True, quiet=True)
+    handle.json({"a": 1})
+    assert out.getvalue() == canonical_json({"a": 1})
+    assert err.getvalue() == ""
+
+
+def test_error_envelope_usage_exit_2() -> None:
+    envelope = error_envelope(
+        "E-USAGE",
+        2,
+        "unrecognised arguments",
+        details={"usage": "gregraph new TYPE"},
+    )
+    assert envelope == {
+        "error": {
+            "code": "E-USAGE",
+            "exit_code": 2,
+            "message": "unrecognised arguments",
+            "finding": None,
+            "details": {"usage": "gregraph new TYPE"},
+        }
+    }
+
+
+def test_error_envelope_environment_exit_3_defaults_empty_details() -> None:
+    envelope = error_envelope("E-NO-REPOSITORY", 3, "not a gregraph repository")
+    assert envelope == {
+        "error": {
+            "code": "E-NO-REPOSITORY",
+            "exit_code": 3,
+            "message": "not a gregraph repository",
+            "finding": None,
+            "details": {},
+        }
+    }
+
+
+def test_error_envelope_environment_exit_3_path_details() -> None:
+    envelope = error_envelope(
+        "E-ENV", 3, "unreadable sidecar", details={"path": "documents/x.json"}
+    )
+    assert envelope["error"]["details"] == {"path": "documents/x.json"}
+
+
+def test_error_envelope_refusal_exit_4_mirrors_finding_details() -> None:
+    finding = Finding(
+        code="E-CYCLE",
+        severity="E",
+        subject="RE-B",
+        message="adding RE-A refines RE-B creates a cycle",
+        fix="gregraph link RE-B refines RE-A",
+        details={"cycle": ["RE-B", "RE-A", "RE-B"]},
+    )
+    envelope = error_envelope("E-CYCLE", 4, finding.message, finding=finding)
+    assert envelope == {
+        "error": {
+            "code": "E-CYCLE",
+            "exit_code": 4,
+            "message": "adding RE-A refines RE-B creates a cycle",
+            "finding": {
+                "code": "E-CYCLE",
+                "severity": "E",
+                "id": "RE-B",
+                "message": "adding RE-A refines RE-B creates a cycle",
+                "fix": "gregraph link RE-B refines RE-A",
+                "details": {"cycle": ["RE-B", "RE-A", "RE-B"]},
+            },
+            "details": {"cycle": ["RE-B", "RE-A", "RE-B"]},
+        }
+    }
+
+
+def test_error_envelope_refusal_without_details_yields_empty_details() -> None:
+    finding = Finding(
+        code="E-ID-UNKNOWN", severity="E", subject="RE-9", message="unknown id"
+    )
+    envelope = error_envelope("E-ID-UNKNOWN", 4, finding.message, finding=finding)
+    assert envelope["error"]["finding"] == {
+        "code": "E-ID-UNKNOWN",
+        "severity": "E",
+        "id": "RE-9",
+        "message": "unknown id",
+    }
+    assert envelope["error"]["details"] == {}
+
+
+def test_error_envelope_explicit_details_override_finding_details() -> None:
+    finding = Finding(
+        code="E-X", severity="E", subject="RE-1", message="m", details={"a": 1}
+    )
+    envelope = error_envelope("E-X", 4, "m", finding=finding, details={"b": 2})
+    assert envelope["error"]["details"] == {"b": 2}
+
+
+def test_error_envelope_internal_exit_5() -> None:
+    envelope = error_envelope("E-INTERNAL", 5, "unexpected failure", details={})
+    assert envelope == {
+        "error": {
+            "code": "E-INTERNAL",
+            "exit_code": 5,
+            "message": "unexpected failure",
+            "finding": None,
+            "details": {},
+        }
+    }

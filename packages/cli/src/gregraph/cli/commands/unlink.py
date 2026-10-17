@@ -8,13 +8,14 @@ parse → :func:`gregraph.core.operations.unlink` → format.
 from __future__ import annotations
 
 import argparse
-from typing import cast
+from typing import Any, cast
 
 from gregraph.cli.main import App, UsageError
 from gregraph.cli.prompts import PickRow, pick
 from gregraph.core.models import LinkType
-from gregraph.core.operations import unlink
+from gregraph.core.operations import UnlinkResult, unlink
 from gregraph.core.rules import SYMMETRIC_EDGE_TYPES
+from gregraph.core.validation import report_payload
 from gregraph.core.workspace import Workspace
 
 
@@ -95,6 +96,9 @@ def run(args: argparse.Namespace, app: App) -> int:
         link_type=cast("LinkType", link_type),
         target=target,
     )
+    if app.out.json_mode:
+        app.out.json(_payload(app, result))
+        return 0
     if result.notice is not None:
         app.out.warn(result.notice)
     if result.removed:
@@ -103,3 +107,17 @@ def run(args: argparse.Namespace, app: App) -> int:
             f"(from {result.removed_from})"
         )
     return 0
+
+
+def _payload(app: App, result: UnlinkResult) -> dict[str, Any]:
+    """The ``unlink --json`` payload (AGENT_READINESS §2.4.2)."""
+    return {
+        "source": result.source,
+        "type": result.type,
+        "target": result.target,
+        "removed": result.removed,
+        "removed_from": result.removed_from,
+        "notice": result.notice,
+        "findings": report_payload(result.findings),
+        "notices": [*app.recorded_notes, *result.notices],
+    }

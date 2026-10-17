@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 import traceback
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -31,7 +33,7 @@ from pydantic import ValidationError
 
 from gregraph import __version__
 from gregraph.cli import webui
-from gregraph.cli.output import Output
+from gregraph.cli.output import Output, error_envelope
 from gregraph.core.config import read_config
 from gregraph.core.git import GitAdapter, NoteSuppressor, NullGitAdapter
 from gregraph.core.models import OperationRefused
@@ -68,6 +70,8 @@ _COMMAND_MODULES: dict[str, str] = {
     "template": "gregraph.cli.commands.template",
     "cr": "gregraph.cli.commands.cr",
     "repair": "gregraph.cli.commands.repair",
+    "schema": "gregraph.cli.commands.schema",
+    "context": "gregraph.cli.commands.context",
     "term": "gregraph.cli.commands.term",
     "baseline": "gregraph.cli.commands.baseline",
     "hooks": "gregraph.cli.commands.hooks",
@@ -84,6 +88,19 @@ class UsageError(Exception):
         self.usage = usage
 
 
+class NoRepositoryError(FileNotFoundError):
+    """No gregraph repository at/above the base directory — exit code 3.
+
+    Distinguished from other :class:`FileNotFoundError` cases so ``--json``
+    can emit the ``E-NO-REPOSITORY`` envelope code (AGENT_READINESS §2.2);
+    human-mode output is identical (plain ``FileNotFoundError`` text).
+    """
+
+    def __init__(self, message: str, *, repo_path: str | None = None) -> None:
+        super().__init__(message)
+        self.repo_path = repo_path
+
+
 class _Parser(argparse.ArgumentParser):
     """``ArgumentParser`` whose usage errors raise :class:`UsageError`."""
 
@@ -93,12 +110,18 @@ class _Parser(argparse.ArgumentParser):
 
 @dataclass
 class App:
-    """Per-invocation context handed to every command module."""
+    """Per-invocation context handed to every command module.
+
+    ``recorded_notes`` carries the degraded-mode notes shown on stderr in
+    human mode so ``--json`` payloads can include them as ``notices``
+    (AGENT_READINESS §2.1 R3).
+    """
 
     out: Output
     repo: Path | None = None
     no_input: bool = False
     notes: NoteSuppressor = field(default_factory=NoteSuppressor)
+    recorded_notes: list[str] = field(default_factory=list)
 
     @property
     def interactive(self) -> bool:
@@ -108,23 +131,25 @@ class App:
     def open_workspace(self) -> Workspace:
         """Open the repository: ``--repo`` is the root, else discover.
 
-        Raises ``FileNotFoundError`` when there is no repository — mapped to
-        exit code 3 by :func:`main`.
+        Raises :class:`NoRepositoryError` (a ``FileNotFoundError``) when there
+        is no repository — mapped to exit code 3 by :func:`main`.
         """
         if self.repo is not None:
             base = self.repo.resolve()
             root = find_root(base)
             if root is None or root != base:
-                raise FileNotFoundError(
-                    f"not a gregraph repository (no .gregraph/config.toml): {base}"
+                raise NoRepositoryError(
+                    f"not a gregraph repository (no .gregraph/config.toml): {base}",
+                    repo_path=str(self.repo) if self.repo is not None else None,
                 )
         else:
             base = Path.cwd()
             root = find_root(base)
             if root is None:
-                raise FileNotFoundError(
+                raise NoRepositoryError(
                     "no gregraph repository (no .gregraph/config.toml) "
-                    f"at or above {base}"
+                    f"at or above {base}",
+                    repo_path=str(self.repo) if self.repo is not None else None,
                 )
         config = read_config(config_path(root))
         probe = GitAdapter(root)
@@ -133,10 +158,17 @@ class App:
         return Workspace(root=root, config=config, git=NullGitAdapter())
 
     def note(self, feature: str) -> None:
-        """Degraded-mode note, at most once per invocation."""
+        """Degraded-mode note, at most once per invocation.
+
+        The note is recorded for ``--json`` payloads (``notices``) and shown
+        on stderr in human mode (:meth:`Output.note` is a no-op under
+        ``--json``).
+        """
         message = self.notes.take(feature)
         if message is not None:
-            self.out.note(message.removeprefix("note: "))
+            clean = message.removeprefix("note: ")
+            self.recorded_notes.append(clean)
+            self.out.note(clean)
 
 
 def _stdin_isatty() -> bool:
@@ -168,7 +200,7 @@ def _global_parent() -> _Parser:
         "--json",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="machine-readable output for list/show/status/validate/check/graph",
+        help="emit canonical JSON on stdout",
     )
     parent.add_argument(
         "-q",
@@ -201,6 +233,47 @@ def _add_command(
             if pseudo.dest == name:
                 subparsers._choices_actions.remove(pseudo)
     return command
+
+
+def _add_authoring_flags(target: _Parser, *, whole_body: bool) -> None:
+    """Template-guided authoring flags (AGENT_READINESS §3.4).
+
+    ``--section``/``--section-file`` everywhere; the whole-body pair
+    ``--body``/``--body-file`` only where the operation replaces the body
+    (``new``, ``edit``, ``supersede``); ``--strict`` activates the write-time
+    required-section check.
+    """
+    target.add_argument(
+        "--section",
+        action="append",
+        default=[],
+        metavar="HEADING=CONTENT",
+        help="section content (repeatable)",
+    )
+    target.add_argument(
+        "--section-file",
+        action="append",
+        default=[],
+        dest="section_file",
+        metavar="HEADING=PATH",
+        help="section content from a file, '-' for stdin (repeatable)",
+    )
+    if whole_body:
+        target.add_argument(
+            "--body", default=None, metavar="TEXT", help="whole body text"
+        )
+        target.add_argument(
+            "--body-file",
+            default=None,
+            dest="body_file",
+            metavar="PATH",
+            help="whole body text from a file, '-' for stdin",
+        )
+    target.add_argument(
+        "--strict",
+        action="store_true",
+        help="refuse when a required section is empty or placeholder",
+    )
 
 
 def _loopback_host(text: str) -> str:
@@ -318,11 +391,24 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument(
         "--edit", action="store_true", help="open the document in $VISUAL/$EDITOR"
     )
+    _add_authoring_flags(new, whole_body=True)
 
     link = _add_command(subparsers, parents, "link", "add an edge")
     link.add_argument("source", nargs="?", default=None, help="source document ID")
     link.add_argument("type", nargs="?", default=None, help="edge type")
     link.add_argument("target", nargs="?", default=None, help="target document ID")
+    link.add_argument(
+        "--candidates",
+        action="store_true",
+        help="list the admissible (type, target) pairs for SOURCE_ID",
+    )
+    link.add_argument(
+        "--type",
+        dest="candidate_type",
+        default=None,
+        metavar="EDGE_TYPE",
+        help="edge type for --candidates",
+    )
     link.epilog = (
         "edge guidelines:\n"
         '- Ask "if the target were deleted, would the source still make sense '
@@ -443,9 +529,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="id",
         help="sort key",
     )
+    list_command.add_argument(
+        "--body",
+        action="store_true",
+        help="include the full Markdown body (--json only)",
+    )
 
     show = _add_command(subparsers, parents, "show", "show one document")
-    show.add_argument("id", nargs="?", default=None, help="document (or CR) ID")
+    show.add_argument("id", nargs="*", default=[], help="document (or CR) ID(s)")
     show.add_argument(
         "--body", action="store_true", help="also print the Markdown body"
     )
@@ -464,8 +555,38 @@ def build_parser() -> argparse.ArgumentParser:
         "open the Markdown in $VISUAL/$EDITOR",
     )
     edit.add_argument("id", nargs="?", default=None, help="document ID")
+    _add_authoring_flags(edit, whole_body=True)
 
     _add_command(subparsers, parents, "status", "repository status")
+
+    schema = _add_command(subparsers, parents, "schema", "show the repository rulebook")
+    schema.add_argument(
+        "--type", default=None, metavar="TYPE", help="one document type only"
+    )
+
+    context = _add_command(
+        subparsers, parents, "context", "context bundle for implementation"
+    )
+    context.add_argument("ids", nargs="+", metavar="ID", help="document or CR ID(s)")
+    context.add_argument(
+        "--depth",
+        type=int,
+        default=1,
+        metavar="N",
+        help="neighbourhood depth (default: 1)",
+    )
+    context.add_argument(
+        "--direction",
+        choices=["both", "upstream", "downstream"],
+        default="both",
+        help="which edges to follow",
+    )
+    context.add_argument(
+        "--include-terms",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="include glossary terms found in the bodies",
+    )
 
     graph = _add_command(subparsers, parents, "graph", "export a Mermaid graph")
     graph.add_argument(
@@ -532,6 +653,7 @@ def build_parser() -> argparse.ArgumentParser:
     supersede.add_argument(
         "--edit", action="store_true", help="open the new document in $VISUAL/$EDITOR"
     )
+    _add_authoring_flags(supersede, whole_body=True)
 
     deprecate = _add_command(subparsers, parents, "deprecate", "deprecate a document")
     deprecate.add_argument("id", nargs="?", default=None, help="document ID")
@@ -607,6 +729,7 @@ def build_parser() -> argparse.ArgumentParser:
     cr_new.add_argument(
         "--edit", action="store_true", help="open the CR in $VISUAL/$EDITOR"
     )
+    _add_authoring_flags(cr_new, whole_body=False)
     cr_scope = cr_cmds.add_parser("scope", parents=parents, help="edit CR scope")
     scope_cmds = cr_scope.add_subparsers(dest="scope_cmd", metavar="subcommand")
     scope_add = scope_cmds.add_parser("add", parents=parents, help="add a scope entry")
@@ -669,6 +792,9 @@ def build_parser() -> argparse.ArgumentParser:
     repair_cmds.add_parser(
         "cache", parents=parents, help="delete and rebuild the cache"
     )
+    repair_cmds.add_parser(
+        "agents", parents=parents, help="regenerate AGENTS.md and SKILL.md"
+    )
 
     term = _add_command(subparsers, parents, "term", "glossary terms")
     term_cmds = term.add_subparsers(dest="term_cmd", metavar="subcommand")
@@ -680,6 +806,7 @@ def build_parser() -> argparse.ArgumentParser:
     term_add.add_argument(
         "--edit", action="store_true", help="open the term body in $VISUAL/$EDITOR"
     )
+    _add_authoring_flags(term_add, whole_body=False)
     term_cmds.add_parser("list", parents=parents, help="list terms")
     term_show = term_cmds.add_parser("show", parents=parents, help="show a term")
     term_show.add_argument("slug", metavar="SLUG", help="term slug")
@@ -779,6 +906,25 @@ def _route_link_refresh(argv: list[str]) -> list[str]:
     return argv
 
 
+def _has_json_flag(argv: Sequence[str]) -> bool:
+    """Whether raw ``argv`` asks for ``--json`` (AGENT_READINESS §2.1 R1).
+
+    Sniffed from the raw tokens because a *parse* error means there are no
+    parsed ``args`` yet. ``--json`` after ``--`` is a positional value, not a
+    flag. ``serve`` is the lifecycle exception (design §21.3): it accepts and
+    ignores ``--json`` and stays outside the machine-readable contract.
+    """
+    index = _command_index(list(argv))
+    if index is not None and argv[index] == "serve":
+        return False
+    for token in argv:
+        if token == "--":
+            return False
+        if token == "--json":
+            return True
+    return False
+
+
 # --------------------------------------------------------------------------
 # dispatch and exit codes
 # --------------------------------------------------------------------------
@@ -820,21 +966,39 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``gregraph`` console script and ``python -m gregraph``.
 
     Returns the exit code; ``--help``/``--version`` raise
-    ``SystemExit`` as argparse does.
+    ``SystemExit`` as argparse does. With ``--json`` (AGENT_READINESS §2.1)
+    stdout carries exactly one canonical JSON document — the command's success
+    payload, its exit-1 result document, or an error envelope for exits
+    2/3/4/5 — and stderr stays empty (exit 5 prints its traceback to stderr
+    only with ``GREGRAPH_DEBUG=1``).
     """
     raw = list(sys.argv[1:]) if argv is None else list(argv)
+    routed = _route_link_refresh(raw)
     parser = build_parser()
     out = Output()
     try:
-        args = parser.parse_args(_route_link_refresh(raw))
+        args = parser.parse_args(routed)
     except UsageError as exc:
+        if _has_json_flag(routed):
+            out.json_mode = True
+            out.json(
+                error_envelope(
+                    "E-USAGE",
+                    EXIT_USAGE,
+                    str(exc),
+                    details={"usage": exc.usage} if exc.usage else {},
+                )
+            )
+            return EXIT_USAGE
         if exc.usage:
             print(exc.usage, end="", file=out.stderr)
         out.error(str(exc))
         _serve_install_hint(raw, out)
         return EXIT_USAGE
 
-    out.json_mode = bool(getattr(args, "json", False))
+    out.json_mode = bool(getattr(args, "json", False)) and (
+        getattr(args, "command", None) != "serve"
+    )
     out.quiet = bool(getattr(args, "quiet", False))
     out.verbose = bool(getattr(args, "verbose", False))
     app = App(
@@ -843,35 +1007,109 @@ def main(argv: list[str] | None = None) -> int:
         no_input=bool(getattr(args, "no_input", False)),
     )
     if args.command is None:
+        if out.json_mode:
+            out.json(
+                error_envelope(
+                    "E-USAGE",
+                    EXIT_USAGE,
+                    "missing command",
+                    details={"usage": parser.format_help()},
+                )
+            )
+            return EXIT_USAGE
         parser.print_help(file=out.stdout)
         return EXIT_USAGE
 
     try:
+        if out.json_mode and getattr(args, "edit", False):
+            # R8: an interactive editor cannot be part of a machine-readable
+            # call (AGENT_READINESS §2.1 R8).
+            raise UsageError(
+                "--edit and --json cannot be used together",
+                usage=parser.format_usage(),
+            )
         return _dispatch(args, app)
     except UsageError as exc:
+        if out.json_mode:
+            out.json(
+                error_envelope(
+                    "E-USAGE",
+                    EXIT_USAGE,
+                    str(exc),
+                    details={"usage": exc.usage} if exc.usage else {},
+                )
+            )
+            return EXIT_USAGE
         if exc.usage:
             print(exc.usage, end="", file=out.stderr)
         out.error(str(exc))
         return EXIT_USAGE
     except OperationRefused as exc:
+        if out.json_mode:
+            out.json(
+                error_envelope(
+                    exc.finding.code,
+                    EXIT_REFUSED,
+                    exc.finding.message,
+                    finding=exc.finding,
+                )
+            )
+            return EXIT_REFUSED
         out.finding(exc.finding)
         return EXIT_REFUSED
     except ValidationError as exc:
+        if out.json_mode:
+            out.json(error_envelope("E-ENV", EXIT_ENV, f"invalid data: {exc}"))
+            return EXIT_ENV
         out.error(f"invalid data: {exc}")
         return EXIT_ENV
+    except NoRepositoryError as exc:
+        if out.json_mode:
+            details = {"path": exc.repo_path} if exc.repo_path is not None else {}
+            out.json(
+                error_envelope("E-NO-REPOSITORY", EXIT_ENV, str(exc), details=details)
+            )
+            return EXIT_ENV
+        out.error(str(exc))
+        return EXIT_ENV
     except FileNotFoundError as exc:
+        if out.json_mode:
+            details = (
+                {"path": str(exc.filename)} if getattr(exc, "filename", None) else {}
+            )
+            out.json(error_envelope("E-ENV", EXIT_ENV, str(exc), details=details))
+            return EXIT_ENV
         out.error(str(exc))
         return EXIT_ENV
     except ValueError as exc:
+        if out.json_mode:
+            out.json(error_envelope("E-USAGE", EXIT_USAGE, str(exc)))
+            return EXIT_USAGE
         out.error(str(exc))
         return EXIT_USAGE
     except NotImplementedError as exc:
+        if out.json_mode:
+            out.json(error_envelope("E-INTERNAL", EXIT_INTERNAL, str(exc)))
+            return EXIT_INTERNAL
         out.error(str(exc))
         return EXIT_INTERNAL
     except OSError as exc:
+        if out.json_mode:
+            details = (
+                {"path": str(exc.filename)} if getattr(exc, "filename", None) else {}
+            )
+            out.json(error_envelope("E-ENV", EXIT_ENV, str(exc), details=details))
+            return EXIT_ENV
         out.error(str(exc))
         return EXIT_ENV
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — the exit-5 boundary (spec §13)
+        if out.json_mode:
+            if os.environ.get("GREGRAPH_DEBUG") == "1":
+                traceback.print_exc(file=out.stderr)
+            out.json(
+                error_envelope("E-INTERNAL", EXIT_INTERNAL, f"internal error: {exc}")
+            )
+            return EXIT_INTERNAL
         if out.verbose:
             traceback.print_exc(file=out.stderr)
         out.error(f"internal error: {exc}")

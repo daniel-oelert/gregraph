@@ -184,3 +184,88 @@ def test_show_cr_delegates_to_cr_show(sample_graph: SampleGraph) -> None:
     assert payload["kind"] == "change-request"
     assert payload["title"] == "Switch to shared storage"
     assert payload["scope"] == []
+
+
+# --------------------------------------------------------------------------
+# multi-ID show (AGENT_READINESS §6.2, AGENT-029)
+# --------------------------------------------------------------------------
+
+
+def test_show_multiple_ids_print_sequential_documents(
+    sample_graph: SampleGraph, capsys
+) -> None:
+    root = sample_graph.root
+    story = sample_graph.ids["story"]
+    goal = sample_graph.ids["goal"]
+    text = show_text(root, story, goal)
+    story_text = show_text(root, story)
+    goal_text = show_text(root, goal)
+    separator = "\n\n---\n"
+    assert separator in text
+    assert text == f"{story_text}\n---\n{goal_text}"
+
+
+def test_show_single_id_output_is_unchanged_by_multi_support(
+    sample_graph: SampleGraph,
+) -> None:
+    # Byte-for-byte backward compatibility (§6.2).
+    root = sample_graph.root
+    story = sample_graph.ids["story"]
+    assert show_text(root, story) == show_text(root, story, story)
+
+
+def test_show_multiple_ids_json_array(sample_graph: SampleGraph) -> None:
+    root = sample_graph.root
+    story = sample_graph.ids["story"]
+    goal = sample_graph.ids["goal"]
+    payload = show_json(root, story, goal)
+    assert isinstance(payload, list)
+    assert [item["id"] for item in payload] == [story, goal]
+    single = show_json(root, story)
+    assert payload[0] == single
+
+
+def test_show_multiple_ids_deduplicate_preserving_order(
+    sample_graph: SampleGraph,
+) -> None:
+    root = sample_graph.root
+    story = sample_graph.ids["story"]
+    goal = sample_graph.ids["goal"]
+    payload = show_json(root, story, goal, story.lower())
+    assert isinstance(payload, list)
+    assert [item["id"] for item in payload] == [story, goal]
+
+
+def test_show_multi_includes_cr_entry(sample_graph: SampleGraph) -> None:
+    install_templates(sample_graph.root, "change-request")
+    created = cr_new(sample_graph.workspace, title="Switch to shared storage")
+    root = sample_graph.root
+    story = sample_graph.ids["story"]
+    payload = show_json(root, story, created.id)
+    assert isinstance(payload, list)
+    assert payload[0]["id"] == story
+    assert payload[1]["kind"] == "change-request"
+    assert payload[1]["title"] == "Switch to shared storage"
+
+
+def test_show_multi_unknown_id_aborts_before_output(
+    sample_graph: SampleGraph, capsys
+) -> None:
+    root = sample_graph.root
+    story = sample_graph.ids["story"]
+    assert main(["--repo", str(root), "show", story, "RE-NOSUCH"]) == 4
+    captured = capsys.readouterr()
+    assert "E-ID-UNKNOWN" in captured.err
+    assert story not in captured.out
+
+
+def test_show_multi_body_flag(sample_graph: SampleGraph) -> None:
+    root = sample_graph.root
+    story = sample_graph.ids["story"]
+    goal = sample_graph.ids["goal"]
+    text = show_text(root, story, goal, "--body")
+    assert "Sample body for Upload from the desktop." in text
+    assert "Sample body for Increase self-service." in text
+    payload = show_json(root, story, goal, "--body")
+    assert isinstance(payload, list)
+    assert all("body" in item for item in payload)

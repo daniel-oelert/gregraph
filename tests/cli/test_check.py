@@ -72,6 +72,19 @@ def run_git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
 
 
+def commit_seed(root: Path, message: str = "init") -> None:
+    """Test scaffolding: commit the whole tree when ``root`` is a Git repository.
+
+    The uncommitted-``v1`` grace period (AGENT_READINESS §3.3) applies only to
+    documents absent from ``HEAD``; committing the seed first makes a later
+    edit a normal post-commit ``v1 → v2`` bump.
+    """
+    if not (root / ".git").exists():
+        return
+    run_git(root, "add", "-A")
+    run_git(root, "-c", "user.name=T", "-c", "user.email=t@e", "commit", "-m", message)
+
+
 # --------------------------------------------------------------------------
 # blocking policy (spec §7.5)
 # --------------------------------------------------------------------------
@@ -102,6 +115,7 @@ def test_check_blocks_on_newly_outdated_links(
     tmp_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     goal_id, story_id = linked_pair(tmp_repo)
+    commit_seed(tmp_repo)  # git mode: v1 is in HEAD, so an edit is a normal bump
     edit_body(tmp_repo, goal_id)
     assert main(["--repo", str(tmp_repo), "check"]) == 1
     out = capsys.readouterr().out
@@ -120,6 +134,7 @@ def test_check_warn_policy_never_blocks(
     config = read_config(config_path(tmp_repo))
     config.versioning.on_outdated_links = "warn"
     write_config(config_path(tmp_repo), config)
+    commit_seed(tmp_repo)
     edit_body(tmp_repo, goal_id)
     assert main(["--repo", str(tmp_repo), "check"]) == 0
     out = capsys.readouterr().out
@@ -131,6 +146,7 @@ def test_check_previously_outdated_reported_not_blocking(
     tmp_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     goal_id, story_id = linked_pair(tmp_repo)
+    commit_seed(tmp_repo)
     edit_body(tmp_repo, goal_id)
     assert main(["--repo", str(tmp_repo), "sync", "--bump"]) == 0
     assert read_doc(tmp_repo, story_id).links[0].target_version == 1  # outdated
@@ -147,6 +163,7 @@ def test_check_json_payload(tmp_repo: Path) -> None:
     import io
 
     goal_id, story_id = linked_pair(tmp_repo)
+    commit_seed(tmp_repo)
     edit_body(tmp_repo, goal_id)
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
@@ -191,3 +208,74 @@ def test_check_open_conflicts_block_policy_on_baseline(
     edit_body(tmp_repo, story_id)
     run_git(tmp_repo, "add", "-A")
     assert main(["--repo", str(tmp_repo), "check"]) == 1
+
+
+# --------------------------------------------------------------------------
+# uncommitted-v1 grace period (AGENT_READINESS §3.3, AGENT-011) and payload
+# --------------------------------------------------------------------------
+
+
+def test_check_initialised_bucket_for_uncommitted_v1(
+    tmp_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """§3.3: an uncommitted ``v1`` edit lands in ``initialised``, not
+    ``would_bump``, and never blocks as a pending-outdated target."""
+    if not (tmp_repo / ".git").exists():
+        pytest.skip("the grace period is a git-mode behaviour")
+    goal_id, _story_id = linked_pair(tmp_repo)
+    commit_seed(tmp_repo)
+    workspace = Workspace.open(tmp_repo)
+    fresh = create_document(
+        workspace, type="user-story", title="Fresh story", links=[("refines", goal_id)]
+    )
+    edit_body(tmp_repo, fresh.id)
+    capsys.readouterr()
+    assert main(["--repo", str(tmp_repo), "check", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["initialised"] == [fresh.id]
+    assert payload["would_bump"] == []
+    assert payload["blocked"] is False
+    assert read_doc(tmp_repo, fresh.id).version == 1
+    entry = payload["newly_outdated"]
+    assert entry == []  # a grace target is never pending-outdated (§3.3 rule 4)
+
+
+def test_check_json_payload_has_additive_keys(
+    tmp_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """§2.4.3: ``check --json`` keeps its shape and adds the new keys."""
+    goal_id, story_id = linked_pair(tmp_repo)
+    commit_seed(tmp_repo)
+    edit_body(tmp_repo, goal_id)
+    capsys.readouterr()
+    assert main(["--repo", str(tmp_repo), "check", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {
+        "blocked",
+        "block_reasons",
+        "would_bump",
+        "initialised",
+        "findings",
+        "newly_outdated",
+        "previously_outdated",
+        "stale",
+        "pending",
+        "refresh_commands",
+        "notices",
+    }
+    assert payload["would_bump"] == [goal_id]
+    assert payload["initialised"] == []
+    assert payload["refresh_commands"] == [
+        f"gregraph link refresh {story_id} refines {goal_id}"
+    ]
+    for entry in payload["previously_outdated"] + payload["stale"] + payload["pending"]:
+        assert set(entry) == {
+            "source",
+            "type",
+            "target",
+            "link_target_version",
+            "target_version",
+            "effective",
+            "state",
+            "newly",
+        }

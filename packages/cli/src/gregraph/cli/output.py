@@ -94,6 +94,40 @@ def document_payload(document: Document, **derived: object) -> dict[str, Any]:
     return data
 
 
+def error_envelope(
+    code: str,
+    exit_code: int,
+    message: str,
+    *,
+    finding: Finding | None = None,
+    details: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The ``--json`` error envelope for exits 2/3/4/5 (AGENT_READINESS §2.2).
+
+    ``error.details`` is always present: it mirrors ``finding.details`` unless
+    ``details`` is given explicitly (``{}`` when neither is set). ``finding``
+    is the complete §14 report shape (including ``details``) or ``null``.
+    """
+    resolved_details: dict[str, Any]
+    if details is not None:
+        resolved_details = dict(details)
+    elif finding is not None and finding.details is not None:
+        resolved_details = dict(finding.details)
+    else:
+        resolved_details = {}
+    return {
+        "error": {
+            "code": code,
+            "exit_code": exit_code,
+            "message": message,
+            "finding": (
+                finding.model_dump(mode="json") if finding is not None else None
+            ),
+            "details": resolved_details,
+        }
+    }
+
+
 def format_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
     """Space-aligned columns; the header row is not padded past its own width."""
     columns = list(headers)
@@ -156,14 +190,22 @@ class Output:
         print(text, file=self.stdout)
 
     def warn(self, text: str) -> None:
-        """Warning on stderr; suppressed by ``--quiet``."""
-        if self.quiet:
+        """Warning on stderr; suppressed by ``--quiet`` and ``--json``.
+
+        Under ``--json`` warnings travel inside the payload as ``notices``
+        instead (AGENT_READINESS §2.1 R3).
+        """
+        if self.quiet or self.json_mode:
             return
         print(self.palette.warn(f"warning: {text}"), file=self.stderr)
 
     def note(self, text: str) -> None:
-        """Degraded-mode note on stderr; suppressed by ``--quiet``."""
-        if self.quiet:
+        """Degraded-mode note on stderr; suppressed by ``--quiet`` and ``--json``.
+
+        Under ``--json`` notes travel inside the payload as ``notices``
+        instead (AGENT_READINESS §2.1 R3).
+        """
+        if self.quiet or self.json_mode:
             return
         print(self.palette.dim(f"note: {text}"), file=self.stderr)
 
@@ -172,7 +214,13 @@ class Output:
         print(self.palette.error(f"error: {text}"), file=self.stderr)
 
     def finding(self, finding: Finding) -> None:
-        """One refusal/validation finding on stderr."""
+        """One refusal/validation finding on stderr.
+
+        Under ``--json`` the finding travels inside the error envelope or
+        payload instead, so stderr stays empty (AGENT_READINESS §2.1 R3).
+        """
+        if self.json_mode:
+            return
         print(format_finding(finding, palette=self.palette), file=self.stderr)
 
     def report(self, findings: Iterable[Finding]) -> None:

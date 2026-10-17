@@ -1,20 +1,23 @@
-"""``gregraph migrate`` (spec §13.16, §7.7): migrate template versions.
+"""``gregraph migrate`` (spec §13.16, §7.7, AGENT_READINESS §2.4.1): migrate.
 
 Exactly one selection: document IDs, ``--all`` or ``--template NAME``. Each
 selected document is migrated in place when every version step to the target
 is non-breaking, or by supersession when a step is breaking or ``--supersede``
-is given. ``--dry-run`` prints the plan without writing. Thin: parse →
-:func:`gregraph.core.operations.migrate` → plan output.
+is given. ``--dry-run`` prints the plan without writing. ``--json`` emits
+``{dry_run, items, findings, notices}`` with per-item plans (§2.4.1). Thin:
+parse → :func:`gregraph.core.operations.migrate` → plan output.
 """
 
 from __future__ import annotations
 
 import argparse
+from typing import Any
 
 from gregraph.cli.commands import document_pick_rows
 from gregraph.cli.main import App, UsageError
 from gregraph.cli.prompts import pick
 from gregraph.core.operations import MigrateResult, MigrationItem, migrate
+from gregraph.core.validation import report_payload
 from gregraph.core.workspace import Workspace
 
 
@@ -37,8 +40,55 @@ def run(args: argparse.Namespace, app: App) -> int:
         supersede=args.supersede,
         dry_run=args.dry_run,
     )
+    if app.out.json_mode:
+        app.out.json(_payload(app, result))
+        return 0
     _print_plan(app, result)
     return 0
+
+
+def _item_payload(item: MigrationItem) -> dict[str, Any]:
+    """One migration item (§2.4.1): plan fields, stale inbound, findings."""
+    return {
+        "id": item.id,
+        "kind": item.kind,
+        "from_version": item.from_version,
+        "to_version": item.to_version,
+        "new_id": item.new_id,
+        "renamed": [list(pair) for pair in item.renamed],
+        "inserted": list(item.inserted),
+        "unknown": list(item.unknown),
+        "unmapped": list(item.unmapped),
+        "manual_attention": list(item.manual_attention),
+        "stale_inbound": [
+            {
+                "source": stale.source,
+                "type": stale.type,
+                "target": stale.target,
+                "target_version": stale.target_version,
+            }
+            for stale in item.stale_inbound
+        ],
+        "findings": report_payload(item.findings),
+        "notices": list(item.notices),
+    }
+
+
+def _payload(app: App, result: MigrateResult) -> dict[str, Any]:
+    return {
+        "dry_run": result.dry_run,
+        "items": [_item_payload(item) for item in result.items],
+        "findings": [
+            finding
+            for item in result.items
+            for finding in report_payload(item.findings)
+        ],
+        "notices": [
+            *app.recorded_notes,
+            *result.notices,
+            *[notice for item in result.items for notice in item.notices],
+        ],
+    }
 
 
 def _pick_documents(app: App, workspace: Workspace) -> list[str]:

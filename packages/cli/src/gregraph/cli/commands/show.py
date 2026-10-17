@@ -1,10 +1,13 @@
-"""``gregraph show`` (spec §13.11): one document in full.
+"""``gregraph show`` (spec §13.11, AGENT_READINESS §6.2): documents in full.
 
 Sidecar fields, derived status, outbound/inbound edges with freshness, one
 level upstream (hierarchical), unlimited-depth downstream tree (directed,
 ``--depth`` limits the printed tree), assets and template info; ``--body``
-prints the Markdown. CR IDs delegate to ``cr show`` (spec §13.11). Thin:
-parse → :func:`gregraph.core.operations.show_document` → format.
+prints the Markdown. CR IDs delegate to ``cr show`` (spec §13.11). Multiple
+IDs print the documents sequentially (JSON: an array of the same payloads);
+duplicates are de-duplicated preserving first-seen order and any unknown ID
+aborts before any output. Thin: parse →
+:func:`gregraph.core.operations.show_document` → format.
 """
 
 from __future__ import annotations
@@ -24,8 +27,8 @@ def run(args: argparse.Namespace, app: App) -> int:
     workspace = app.open_workspace()
     if args.depth is not None and args.depth < 0:
         raise ValueError("depth must be zero or positive")
-    doc_id = args.id
-    if doc_id is None:
+    raw_ids = [args.id] if isinstance(args.id, str) else list(args.id or ())
+    if not raw_ids:
         if not app.interactive:
             raise UsageError("missing document ID (pass ID or drop --no-input)")
         picked = pick(
@@ -35,15 +38,52 @@ def run(args: argparse.Namespace, app: App) -> int:
         )
         if picked is None:
             raise UsageError("cancelled: no document selected")
-        doc_id = picked.key
-    result = show_document(workspace, doc_id, body=args.body)
-    if result.change_request is not None:
-        return _show_change_request(app, result)
-    if app.out.json_mode:
-        app.out.json(_json_payload(result, depth=args.depth, include_body=args.body))
+        raw_ids = [picked.key]
+    # All-or-nothing (§6.2): resolve every requested ID before any output so
+    # an unknown ID refuses with E-ID-UNKNOWN and prints nothing.
+    results: list[ShowResult] = []
+    seen: set[str] = set()
+    for raw_id in raw_ids:
+        result = show_document(workspace, raw_id, body=args.body)
+        if result.id in seen:
+            continue
+        seen.add(result.id)
+        results.append(result)
+    if len(results) == 1:
+        result = results[0]
+        if result.change_request is not None:
+            return _show_change_request(app, result)
+        if app.out.json_mode:
+            app.out.json(json_payload(result, depth=args.depth, include_body=args.body))
+            return 0
+        _print_document(app, result, depth=args.depth)
         return 0
-    _print_document(app, result, depth=args.depth)
+    if app.out.json_mode:
+        app.out.json(
+            [
+                _result_payload(result, depth=args.depth, body=args.body)
+                for result in results
+            ]
+        )
+        return 0
+    for index, result in enumerate(results):
+        if index > 0:
+            app.out.line("")
+            app.out.line("---")
+        if result.change_request is not None:
+            _print_change_request(app, result)
+        else:
+            _print_document(app, result, depth=args.depth)
     return 0
+
+
+def _result_payload(
+    result: ShowResult, *, depth: int | None, body: bool
+) -> dict[str, Any]:
+    """The per-document ``--json`` payload (``cr show`` shape for CRs)."""
+    if result.change_request is not None:
+        return cr_json_payload(result)
+    return json_payload(result, depth=depth, include_body=body)
 
 
 def _limited(result: ShowResult, depth: int | None) -> tuple[tuple[str, int], ...]:
@@ -63,9 +103,14 @@ def _view_payload(view: LinkView) -> dict[str, object]:
     }
 
 
-def _json_payload(
+def json_payload(
     result: ShowResult, *, depth: int | None, include_body: bool
 ) -> dict[str, Any]:
+    """The ``show --json`` document payload (sidecar + derived + graph views).
+
+    Shared with ``gregraph context`` (AGENT_READINESS §6.1), which embeds it
+    per requested target.
+    """
     document = result.document
     assert document is not None
     payload: dict[str, Any] = document_payload(
@@ -87,6 +132,27 @@ def _json_payload(
     if include_body:
         payload["body"] = result.body_text
     return payload
+
+
+def cr_json_payload(result: ShowResult) -> dict[str, Any]:
+    """The ``cr show --json`` payload (spec §13.18); shared with ``context``."""
+    cr = result.change_request
+    assert cr is not None
+    return {
+        "kind": "change-request",
+        "id": cr.id,
+        "title": cr.title,
+        "status": cr.status,
+        "effective": cr.effective,
+        "decisions": [decision.model_dump(mode="json") for decision in cr.decisions],
+        "scope": [dataclasses.asdict(entry) for entry in cr.scope],
+        "introduces": [dataclasses.asdict(entry) for entry in cr.introduces],
+        "impact": list(cr.impact),
+        "branch": cr.branch,
+        "external_ref": cr.external_ref,
+        "tags": list(cr.tags),
+        "extra": dict(cr.extra),
+    }
 
 
 def _format_link(view: LinkView) -> str:
@@ -157,30 +223,10 @@ def _print_document(app: App, result: ShowResult, *, depth: int | None) -> None:
         out.line(result.body_text.rstrip("\n"))
 
 
-def _show_change_request(app: App, result: ShowResult) -> int:
+def _print_change_request(app: App, result: ShowResult) -> None:
     cr = result.change_request
     assert cr is not None
     out = app.out
-    if out.json_mode:
-        payload: dict[str, Any] = {
-            "kind": "change-request",
-            "id": cr.id,
-            "title": cr.title,
-            "status": cr.status,
-            "effective": cr.effective,
-            "decisions": [
-                decision.model_dump(mode="json") for decision in cr.decisions
-            ],
-            "scope": [dataclasses.asdict(entry) for entry in cr.scope],
-            "introduces": [dataclasses.asdict(entry) for entry in cr.introduces],
-            "impact": list(cr.impact),
-            "branch": cr.branch,
-            "external_ref": cr.external_ref,
-            "tags": list(cr.tags),
-            "extra": dict(cr.extra),
-        }
-        out.json(payload)
-        return 0
     out.line(f"{cr.id}  {cr.title}")
     fields: dict[str, str] = {"status": f"{cr.status} (effective: {cr.effective})"}
     if cr.branch:
@@ -210,4 +256,11 @@ def _show_change_request(app: App, result: ShowResult) -> int:
         out.line("  impact:")
         for item in cr.impact:
             out.line(f"    {item}")
+
+
+def _show_change_request(app: App, result: ShowResult) -> int:
+    if app.out.json_mode:
+        app.out.json(cr_json_payload(result))
+        return 0
+    _print_change_request(app, result)
     return 0

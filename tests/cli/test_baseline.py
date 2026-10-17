@@ -8,6 +8,7 @@ and degrades gracefully outside a repository. CLI tests invoke
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -93,3 +94,37 @@ def test_baseline_list_without_git_notes_degraded_mode(
 
 def test_baseline_without_subcommand_is_usage_error(repo: Path) -> None:
     assert main(["--repo", str(repo), "baseline"]) == 2
+
+
+# --------------------------------------------------------------------------
+# --json payloads (AGENT_READINESS §2.4.3)
+# --------------------------------------------------------------------------
+
+
+def test_baseline_create_json_payload(repo: Path, capsys) -> None:
+    commit_all(repo, "content")
+    capsys.readouterr()
+    exit_code = main(["--repo", str(repo), "baseline", "create", "m4", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {"name", "tag", "manifest", "head", "findings", "notices"}
+    assert payload["name"] == "m4"
+    assert payload["tag"] == "baseline/m4"
+    assert payload["head"] is not None
+    manifest = json.loads(payload["manifest"])
+    assert manifest  # the manifest string parses (design §12.4)
+    assert isinstance(payload["findings"], list)
+    assert isinstance(payload["notices"], list)
+
+
+def test_baseline_list_json_payload(repo: Path, capsys) -> None:
+    commit_all(repo, "content")
+    assert main(["--repo", str(repo), "baseline", "create", "m4"]) == 0
+    capsys.readouterr()
+    exit_code = main(["--repo", str(repo), "baseline", "list", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert set(payload) == {"tags", "findings", "notices"}
+    assert payload["tags"] == ["baseline/m4"]

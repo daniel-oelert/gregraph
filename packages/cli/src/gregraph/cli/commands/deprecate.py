@@ -1,20 +1,53 @@
-"""``gregraph deprecate`` / ``gregraph undeprecate`` (spec §13.15, §8).
+"""``gregraph deprecate`` / ``gregraph undeprecate`` (spec §13.15, §8, §2.4.1).
 
 Deprecation sets the one stored status flag (``deprecate ID --reason "…"``);
 ``undeprecate`` clears it. Inbound links of a newly deprecated document
 become stale and are listed — the reviewer decides whether they move or go.
-Thin: parse → :func:`gregraph.core.operations.deprecate` /
+``--json`` emits ``{id, changed, deprecated, stale_inbound, findings,
+notices}``. Thin: parse → :func:`gregraph.core.operations.deprecate` /
 :func:`~gregraph.core.operations.undeprecate` → format.
 """
 
 from __future__ import annotations
 
 import argparse
+from typing import Any
 
 from gregraph.cli.commands import document_pick_rows
 from gregraph.cli.main import App, UsageError
 from gregraph.cli.prompts import pick, prompt_text
-from gregraph.core.operations import StaleInbound, deprecate, undeprecate
+from gregraph.core.operations import (
+    DeprecateResult,
+    StaleInbound,
+    deprecate,
+    undeprecate,
+)
+from gregraph.core.validation import report_payload
+
+
+def deprecate_payload(app: App, result: DeprecateResult) -> dict[str, Any]:
+    """The ``deprecate``/``undeprecate --json`` payload (§2.4.1)."""
+    return {
+        "id": result.id,
+        "changed": result.changed,
+        "deprecated": (
+            result.deprecated.model_dump(mode="json")
+            if result.deprecated is not None
+            else None
+        ),
+        "stale_inbound": [_stale_inbound_entry(item) for item in result.stale_inbound],
+        "findings": report_payload(result.findings),
+        "notices": [*app.recorded_notes, *result.notices],
+    }
+
+
+def _stale_inbound_entry(item: StaleInbound) -> dict[str, Any]:
+    return {
+        "source": item.source,
+        "type": item.type,
+        "target": item.target,
+        "target_version": item.target_version,
+    }
 
 
 def run(args: argparse.Namespace, app: App) -> int:
@@ -34,6 +67,9 @@ def run(args: argparse.Namespace, app: App) -> int:
     out = app.out
     if getattr(args, "command", "") == "undeprecate":
         result = undeprecate(workspace, doc_id=doc_id)
+        if app.out.json_mode:
+            out.json(deprecate_payload(app, result))
+            return 0
         if result.changed:
             out.line(f"undeprecated {result.id}")
         for notice in result.notices:
@@ -47,6 +83,9 @@ def run(args: argparse.Namespace, app: App) -> int:
         if reason is None:
             raise UsageError("cancelled: no reason given")
     result = deprecate(workspace, doc_id=doc_id, reason=reason)
+    if app.out.json_mode:
+        out.json(deprecate_payload(app, result))
+        return 0
     for notice in result.notices:
         out.warn(notice)
     if result.changed:

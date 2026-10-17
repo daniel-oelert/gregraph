@@ -14,6 +14,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from gregraph.core.hashing import body_hash
 from gregraph.core.models import (
     AssetRef,
     ChangeRequest,
@@ -127,6 +128,22 @@ def test_effective_version_unbumped() -> None:
     assert effective_version(doc) == 4
 
 
+def test_effective_version_grace_returns_one() -> None:
+    """§3.3 rule 3 / AGENT-012: an uncommitted v1 is effectively at version 1."""
+    doc = _doc(version=1)
+    object.__setattr__(doc, "_unbumped", True)
+    object.__setattr__(doc, "_in_grace", True)
+    assert effective_version(doc) == 1
+
+
+def test_effective_version_grace_requires_v1() -> None:
+    """§3.3 rule 5 / AGENT-013: past the grace window normal semantics apply."""
+    doc = _doc(version=2)
+    object.__setattr__(doc, "_unbumped", True)
+    object.__setattr__(doc, "_in_grace", True)
+    assert effective_version(doc) == 3
+
+
 # --------------------------------------------------------------------------
 # freshness
 # --------------------------------------------------------------------------
@@ -164,6 +181,66 @@ def test_pending_outdated_link() -> None:
         unbumped={"RE-T": True},
     )
     assert table.entries[0].state == "pending-outdated"
+
+
+def test_pending_outdated_at_effective_version() -> None:
+    """§5.4/D-AGENT-7: tv == version+1 on an unbumped target is pending-outdated."""
+    target = _doc(id="RE-T", version=1)
+    table = freshness_table(
+        [("RE-S", _link("RE-T", 2), target)],
+        unbumped={"RE-T": True},
+    )
+    entry = table.entries[0]
+    assert entry.state == "pending-outdated"
+    assert entry.effective == 2
+
+
+def test_outdated_when_ahead_of_effective() -> None:
+    """§5.4/D-AGENT-7: tv beyond the *effective* version is the ahead case."""
+    target = _doc(id="RE-T", version=1)
+    table = freshness_table(
+        [("RE-S", _link("RE-T", 3), target)],
+        unbumped={"RE-T": True},
+    )
+    entry = table.entries[0]
+    assert entry.state == "outdated"
+    assert entry.effective == 2
+
+
+def test_freshness_grace_target_is_fresh() -> None:
+    """§3.3 rules 3–4: a link into a modified uncommitted v1 is fresh at tv 1."""
+    target = _doc(id="RE-T", version=1)
+    table = freshness_table(
+        [("RE-S", _link("RE-T", 1), target)],
+        unbumped={"RE-T": True},
+        in_grace={"RE-T": True},
+    )
+    entry = table.entries[0]
+    assert entry.state == "fresh"
+    assert entry.effective == 1
+
+
+def test_freshness_grace_via_model_flag() -> None:
+    target = _doc(id="RE-T", version=1)
+    object.__setattr__(target, "_in_grace", True)
+    table = freshness_table(
+        [("RE-S", _link("RE-T", 1), target)],
+        unbumped={"RE-T": True},
+    )
+    assert table.entries[0].state == "fresh"
+
+
+def test_freshness_grace_requires_v1() -> None:
+    """§3.3 rule 5: the grace override applies only at version 1."""
+    target = _doc(id="RE-T", version=2)
+    table = freshness_table(
+        [("RE-S", _link("RE-T", 2), target)],
+        unbumped={"RE-T": True},
+        in_grace={"RE-T": True},
+    )
+    entry = table.entries[0]
+    assert entry.state == "pending-outdated"
+    assert entry.effective == 3
 
 
 def test_newly_vs_previously_outdated() -> None:
@@ -235,6 +312,69 @@ def test_reconcile_scope_hash_change_bumps_cr() -> None:
     assert report.bumped == ["CR-000001"]
     assert cr.version == 2
     assert cr.scope_hash == scope_hash(cr.scope)
+
+
+def test_reconcile_grace_initialises_at_v1() -> None:
+    """§3.3 rules 1–2 / AGENT-011: a modified uncommitted v1 is populated."""
+    doc = _doc(title="Old", body_hash="sha256:old", version=1)
+    body = "# New Title\n\n## Story\ncontent\n"
+    report = reconcile([(doc, body)], mode="bump", in_grace={"RE-000001": True})
+    assert report.initialised == ["RE-000001"]
+    assert report.bumped == []
+    assert doc.version == 1
+    assert doc.title == "New Title"
+    assert doc.body_hash == body_hash(body)
+    # A second pass over the same content is a no-op.
+    report2 = reconcile([(doc, body)], mode="bump", in_grace={"RE-000001": True})
+    assert report2.initialised == []
+    assert report2.bumped == []
+    assert doc.version == 1
+
+
+def test_reconcile_grace_via_model_flag() -> None:
+    doc = _doc(body_hash="sha256:old", version=1)
+    object.__setattr__(doc, "_in_grace", True)
+    body = "# Title\n\n## Story\ncontent\n"
+    report = reconcile([(doc, body)], mode="bump")
+    assert report.initialised == ["RE-000001"]
+    assert report.bumped == []
+    assert doc.version == 1
+
+
+def test_reconcile_grace_report_mode_keeps_target_fresh() -> None:
+    """§3.3 rule 4: report mode must not mark a grace target unbumped."""
+    doc = _doc(id="RE-000001", body_hash="sha256:old", version=1)
+    object.__setattr__(doc, "_in_grace", True)
+    target_view = _doc(id="RE-000001", version=1)  # plain view, no grace flag
+    body = "# Title\n\n## Story\ncontent\n"
+    report = reconcile(
+        [(doc, body)],
+        mode="report",
+        links=[("RE-S", _link("RE-000001", 1), target_view)],
+    )
+    assert report.initialised == ["RE-000001"]
+    assert report.pending == []
+    assert doc.version == 1
+
+
+def test_reconcile_grace_applies_only_at_v1() -> None:
+    """§3.3 rule 5 / AGENT-013: past the grace window a change bumps normally."""
+    doc = _doc(version=2, body_hash="sha256:old")
+    body = "# Title\n\n## Story\ncontent\n"
+    report = reconcile([(doc, body)], mode="bump", in_grace={"RE-000001": True})
+    assert report.bumped == ["RE-000001"]
+    assert report.initialised == []
+    assert doc.version == 3
+
+
+def test_reconcile_degraded_mode_has_no_grace() -> None:
+    """AGENT-014: without a grace signal a modified v1 bumps normally."""
+    doc = _doc(body_hash="sha256:old", version=1)
+    body = "# Title\n\n## Story\ncontent\n"
+    report = reconcile([(doc, body)], mode="bump")
+    assert report.bumped == ["RE-000001"]
+    assert report.initialised == []
+    assert doc.version == 2
 
 
 # --------------------------------------------------------------------------

@@ -7,6 +7,7 @@ foreign hook content, and refusals outside a Git repository. CLI tests invoke
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -108,3 +109,70 @@ def test_status_without_git_is_not_installed(tmp_repo: Path, capsys) -> None:
 
 def test_hooks_without_subcommand_is_usage_error(tmp_repo: Path) -> None:
     assert main(["--repo", str(tmp_repo), "hooks"]) == 2
+
+
+# --------------------------------------------------------------------------
+# --json payloads (AGENT_READINESS §2.4.3)
+# --------------------------------------------------------------------------
+
+
+def test_hooks_install_json_payload(
+    tmp_repo: Path, identity: GitIdentity, capsys
+) -> None:
+    """§2.4.3: ``{hook, path, installed, up_to_date, findings, notices}``."""
+    exit_code = main(["--repo", str(tmp_repo), "hooks", "install", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    assert out.err == ""
+    payload = json.loads(out.out)
+    assert set(payload) == {
+        "hook",
+        "path",
+        "installed",
+        "up_to_date",
+        "findings",
+        "notices",
+    }
+    assert payload["hook"] == "pre-commit"
+    assert payload["path"] == ".git/hooks/pre-commit"
+    assert payload["installed"] is True
+    assert payload["up_to_date"] is True
+    assert payload["findings"] == []
+    assert payload["notices"] == []
+
+
+def test_hooks_status_json_payload(
+    tmp_repo: Path, identity: GitIdentity, capsys
+) -> None:
+    assert main(["--repo", str(tmp_repo), "hooks", "status", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["installed"] is False
+    assert payload["up_to_date"] is False
+    assert not hook_path(tmp_repo).exists()
+
+
+def test_hooks_uninstall_json_payload(
+    tmp_repo: Path, identity: GitIdentity, capsys
+) -> None:
+    assert main(["--repo", str(tmp_repo), "hooks", "install"]) == 0
+    capsys.readouterr()
+    exit_code = main(["--repo", str(tmp_repo), "hooks", "uninstall", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(out.out)
+    assert payload["installed"] is False
+    assert payload["up_to_date"] is False
+    assert payload["notices"] == []
+
+
+def test_hooks_status_json_carries_the_degraded_note(tmp_repo: Path, capsys) -> None:
+    """R3: the degraded-mode note travels inside ``notices`` (stderr empty)."""
+    if (tmp_repo / ".git").exists():
+        pytest.skip("degraded mode only")
+    exit_code = main(["--repo", str(tmp_repo), "hooks", "status", "--json"])
+    out = capsys.readouterr()
+    assert exit_code == 0
+    assert out.err == ""
+    payload = json.loads(out.out)
+    assert payload["notices"] == ["not a git repository — hooks unavailable"]
+    assert payload["installed"] is False
