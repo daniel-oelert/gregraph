@@ -13,49 +13,51 @@ function renderCards(overrides: Partial<StatusResponse>) {
 
 describe("StatusCards link labels", () => {
   it("shows the full 'SRC type TGT' label and opens the SOURCE document on click", async () => {
-    const { onSelect } = renderCards({ pending: ["RE-AAAAAA refines RE-BBBBBB"] });
+    const { onSelect } = renderCards({ pending: ["RE-STORY-AAAAAA refines RE-STORY-BBBBBB"] });
     const user = userEvent.setup();
 
-    const button = screen.getByRole("button", { name: "RE-AAAAAA refines RE-BBBBBB" });
-    expect(button).toHaveTextContent("RE-AAAAAA refines RE-BBBBBB");
+    const button = screen.getByRole("button", { name: "RE-STORY-AAAAAA refines RE-STORY-BBBBBB" });
+    expect(button).toHaveTextContent("RE-STORY-AAAAAA refines RE-STORY-BBBBBB");
     await user.click(button);
 
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith("RE-AAAAAA");
+    expect(onSelect).toHaveBeenCalledWith("RE-STORY-AAAAAA");
   });
 
   it("uses the same source extraction for outdated and stale lists", async () => {
     const { onSelect } = renderCards({
       pending: [],
-      outdated: ["RE-CCCCCC verifies RE-AAAAAA"],
-      stale: ["RE-DDDDDD depends-on-x RE-AAAAAA"],
+      outdated: ["RE-TEST-CCCCCC verifies RE-STORY-AAAAAA"],
+      stale: ["RE-ASM-DDDDDD depends-on-x RE-STORY-AAAAAA"],
     });
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: "RE-CCCCCC verifies RE-AAAAAA" }));
-    await user.click(screen.getByRole("button", { name: "RE-DDDDDD depends-on-x RE-AAAAAA" }));
+    await user.click(screen.getByRole("button", { name: "RE-TEST-CCCCCC verifies RE-STORY-AAAAAA" }));
+    await user.click(screen.getByRole("button", { name: "RE-ASM-DDDDDD depends-on-x RE-STORY-AAAAAA" }));
 
-    expect(onSelect.mock.calls).toEqual([["RE-CCCCCC"], ["RE-DDDDDD"]]);
+    expect(onSelect.mock.calls).toEqual([["RE-TEST-CCCCCC"], ["RE-ASM-DDDDDD"]]);
   });
 
   it("still opens a bare canonical document ID", async () => {
-    const { onSelect } = renderCards({ pending: ["RE-BBBBBB"] });
+    const { onSelect } = renderCards({ pending: ["RE-STORY-BBBBBB"] });
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: "RE-BBBBBB" }));
+    await user.click(screen.getByRole("button", { name: "RE-STORY-BBBBBB" }));
 
-    expect(onSelect).toHaveBeenCalledWith("RE-BBBBBB");
+    expect(onSelect).toHaveBeenCalledWith("RE-STORY-BBBBBB");
   });
 
   it("renders malformed labels as plain text and never navigates to them", async () => {
     const malformed = [
-      "RE-AAAAAA verifies",
+      "RE-STORY-AAAAAA verifies",
       "not a label at all",
-      "re-aaaaaa refines RE-BBBBBB",
-      "RE-AAAAAA Refines RE-BBBBBB",
-      "RE-AAAAAA refines RE-BBBBBB extra",
-      "XXXXXXXXXX-AAAAAA refines RE-BBBBBB",
-      "RE-AAAAAA refines RE-ZZZZZ!",
+      "re-feat-aaaaaa refines RE-GOAL-BBBBBB",
+      "RE-STORY-AAAAAA Refines RE-STORY-BBBBBB",
+      "RE-STORY-AAAAAA refines RE-STORY-BBBBBB extra",
+      "XXXXXXXXXX-STORY-AAAAAA refines RE-STORY-BBBBBB",
+      "RE-STORY-AAAAAA refines RE-ZZZZZ!",
+      "RE-AAAAAA refines RE-BBBBBB",
+      "RE-FEAT-AAAAAA refines RE-BBBBBB",
     ];
     const { onSelect } = renderCards({ pending: malformed });
     const user = userEvent.setup();

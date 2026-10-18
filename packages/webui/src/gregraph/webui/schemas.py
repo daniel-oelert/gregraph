@@ -15,7 +15,7 @@ from gregraph.core.models import LinkType
 
 TYPE_NAME = r"^[a-z][a-z0-9-]{0,63}$"
 TAG = r"^[a-z0-9-]{1,64}$"
-DOC_ID = r"^[A-Za-z0-9-]{1,32}$"
+DOC_ID = r"^[A-Z][A-Z0-9]{0,7}-[A-Z]{3,5}-[0-9A-HJKMNP-TV-Z]{6}$"
 BASE_HASH = r"^sha256:[0-9a-f]{64}$"
 MAX_TAGS = 50
 MAX_TEXT_CHARS = 1_000_000

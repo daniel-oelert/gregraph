@@ -332,6 +332,7 @@ class CacheIndex(BaseModel):
     tool_version: str = __version__
     files: dict[str, CacheFileEntry] = Field(default_factory=dict)
     types_seen: dict[str, str] = Field(default_factory=dict)
+    type_abbreviations: dict[str, str] = Field(default_factory=dict)
     templates_seen: dict[str, str] = Field(default_factory=dict)
 
 

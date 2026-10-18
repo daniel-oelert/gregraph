@@ -4,7 +4,7 @@
  * to open. Patterns mirror core `ids.ID_PATTERN` (spec 4.1, uppercase canonical form) and the
  * edge type slug (spec 5.3).
  */
-const DOC_ID = /^[A-Z][A-Z0-9]{0,7}-[0-9A-HJKMNP-TV-Z]{6}$/;
+const DOC_ID = /^[A-Z][A-Z0-9]{0,7}-[A-Z]{3,5}-[0-9A-HJKMNP-TV-Z]{6}$/;
 const EDGE_TYPE = /^[a-z][a-z0-9-]*$/;
 
 export type ParsedStatusLabel =

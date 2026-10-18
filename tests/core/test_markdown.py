@@ -19,8 +19,8 @@ from gregraph.core.markdown import (
     strip_html_comments,
 )
 
-DOC = Path("documents/user-stories/RE-7F3K2Q.md")
-DOC_ID = "RE-7F3K2Q"
+DOC = Path("documents/user-stories/RE-STORY-7F3K2Q.md")
+DOC_ID = "RE-STORY-7F3K2Q"
 
 
 def test_extract_title_simple() -> None:
@@ -183,33 +183,38 @@ def test_find_section_by_renamed_heading() -> None:
 
 
 def test_find_mentions_wikilink() -> None:
-    mentions = find_mentions("See [[RE-7F3K2Q]] for details.", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+    mentions = find_mentions("See [[RE-STORY-7F3K2Q]] for details.", doc_path=DOC)
+    assert mentions == [Mention("RE-STORY-7F3K2Q", "wikilink")]
 
 
 def test_find_mentions_wikilink_with_label() -> None:
-    mentions = find_mentions("See [[RE-7F3K2Q|Custom label]] here.", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+    mentions = find_mentions("See [[RE-STORY-7F3K2Q|Custom label]] here.", doc_path=DOC)
+    assert mentions == [Mention("RE-STORY-7F3K2Q", "wikilink")]
 
 
 def test_find_mentions_wikilink_label_boundaries() -> None:
     # empty label is not a wikilink; the label may hold any other non-] text
-    assert find_mentions("[[RE-7F3K2Q|]]", doc_path=DOC) == []
-    assert find_mentions("[[RE-7F3K2Q|label] more]]", doc_path=DOC) == []
+    assert find_mentions("[[RE-STORY-7F3K2Q|]]", doc_path=DOC) == []
+    assert find_mentions("[[RE-STORY-7F3K2Q|label] more]]", doc_path=DOC) == []
 
 
 def test_find_mentions_wikilink_case_sensitive() -> None:
-    assert find_mentions("[[re-7f3k2q]]", doc_path=DOC) == []
-    assert find_mentions("[[Re-7F3K2Q]]", doc_path=DOC) == []
+    assert find_mentions("[[re-story-7f3k2q]]", doc_path=DOC) == []
+    assert find_mentions("[[Re-STORY-7F3K2Q]]", doc_path=DOC) == []
 
 
 def test_find_mentions_wikilink_rejects_malformed_ids() -> None:
-    for body in ("[[RE-7F3K2]]", "[[RE-7F3K2QX]]", "[[RE-7F3K2I]]", "[[RE-7F3K2U]]"):
+    for body in (
+        "[[RE-STORY-7F3K2]]",
+        "[[RE-STORY-7F3K2QX]]",
+        "[[RE-STORY-7F3K2I]]",
+        "[[RE-STORY-7F3K2U]]",
+    ):
         assert find_mentions(body, doc_path=DOC) == []
 
 
 def test_find_mentions_bare_id_is_prose() -> None:
-    assert find_mentions("See RE-7F3K2Q for details.", doc_path=DOC) == []
+    assert find_mentions("See RE-STORY-7F3K2Q for details.", doc_path=DOC) == []
 
 
 def test_find_mentions_hyphenated_words_are_prose() -> None:
@@ -218,173 +223,178 @@ def test_find_mentions_hyphenated_words_are_prose() -> None:
 
 
 def test_find_mentions_lowercase_prose_and_href() -> None:
-    assert find_mentions("see re-7f3k2q now", doc_path=DOC) == []
-    assert find_mentions("[x](../features/re-2k7qmb.md)", doc_path=DOC) == []
+    assert find_mentions("see re-story-7f3k2q now", doc_path=DOC) == []
+    assert find_mentions("[x](../features/re-story-2k7qmb.md)", doc_path=DOC) == []
 
 
 def test_find_mentions_prefix_length_variants() -> None:
-    body = "[[A-7F3K2Q]] [[AB-7F3K2Q]] [[ABCDEF-7F3K2Q]]"
+    body = "[[A-FEAT-7F3K2Q]] [[AB-FEAT-7F3K2Q]] [[ABCDEF-FEAT-7F3K2Q]]"
     assert [m.id for m in find_mentions(body, doc_path=DOC)] == [
-        "A-7F3K2Q",
-        "AB-7F3K2Q",
-        "ABCDEF-7F3K2Q",
+        "A-FEAT-7F3K2Q",
+        "AB-FEAT-7F3K2Q",
+        "ABCDEF-FEAT-7F3K2Q",
     ]
 
 
 def test_find_mentions_ignores_code_span_and_fence() -> None:
-    assert find_mentions("`RE-7F3K2Q`", doc_path=DOC) == []
-    assert find_mentions("```\nRE-7F3K2Q\n```\n", doc_path=DOC) == []
-    assert find_mentions("`[[RE-7F3K2Q]]`", doc_path=DOC) == []
-    assert find_mentions("```\n[[RE-7F3K2Q]]\n```\n", doc_path=DOC) == []
+    assert find_mentions("`RE-STORY-7F3K2Q`", doc_path=DOC) == []
+    assert find_mentions("```\nRE-STORY-7F3K2Q\n```\n", doc_path=DOC) == []
+    assert find_mentions("`[[RE-STORY-7F3K2Q]]`", doc_path=DOC) == []
+    assert find_mentions("```\n[[RE-STORY-7F3K2Q]]\n```\n", doc_path=DOC) == []
 
 
 def test_find_mentions_ignores_html() -> None:
-    assert find_mentions("<!-- [[RE-7F3K2Q]] -->", doc_path=DOC) == []
-    assert find_mentions("a <!-- [[RE-7F3K2Q]] --> b", doc_path=DOC) == []
-    assert find_mentions("<div>\n[[RE-7F3K2Q]]\n</div>\n", doc_path=DOC) == []
-    assert find_mentions("<b>[[RE-7F3K2Q]]</b>", doc_path=DOC) == []
+    assert find_mentions("<!-- [[RE-STORY-7F3K2Q]] -->", doc_path=DOC) == []
+    assert find_mentions("a <!-- [[RE-STORY-7F3K2Q]] --> b", doc_path=DOC) == []
+    assert find_mentions("<div>\n[[RE-STORY-7F3K2Q]]\n</div>\n", doc_path=DOC) == []
+    assert find_mentions("<b>[[RE-STORY-7F3K2Q]]</b>", doc_path=DOC) == []
 
 
 def test_find_mentions_wikilink_outside_html_tags() -> None:
-    mentions = find_mentions("<b>bold</b> [[RE-7F3K2Q]]", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+    mentions = find_mentions("<b>bold</b> [[RE-STORY-7F3K2Q]]", doc_path=DOC)
+    assert mentions == [Mention("RE-STORY-7F3K2Q", "wikilink")]
 
 
 def test_find_mentions_markdown_link_to_id() -> None:
-    mentions = find_mentions("[x](../features/RE-2K7QMB.md)", doc_path=DOC)
-    assert mentions == [Mention("RE-2K7QMB", "link")]
+    mentions = find_mentions("[x](../features/RE-STORY-2K7QMB.md)", doc_path=DOC)
+    assert mentions == [Mention("RE-STORY-2K7QMB", "link")]
 
 
 def test_find_mentions_link_target_is_id() -> None:
-    mentions = find_mentions("[see this](RE-7F3K2Q)", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "link")]
+    mentions = find_mentions("[see this](RE-STORY-7F3K2Q)", doc_path=DOC)
+    assert mentions == [Mention("RE-STORY-7F3K2Q", "link")]
 
 
 def test_find_mentions_link_text_is_id() -> None:
-    mentions = find_mentions("[RE-7F3K2Q](https://example.com/spec)", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "link")]
+    mentions = find_mentions(
+        "[RE-STORY-7F3K2Q](https://example.com/spec)", doc_path=DOC
+    )
+    assert mentions == [Mention("RE-STORY-7F3K2Q", "link")]
 
 
 def test_find_mentions_link_text_and_href() -> None:
-    body = "[RE-7F3K2Q](../features/RE-2K7QMB.md)"
+    body = "[RE-STORY-7F3K2Q](../features/RE-STORY-2K7QMB.md)"
     assert set(find_mentions(body, doc_path=DOC)) == {
-        Mention("RE-7F3K2Q", "link"),
-        Mention("RE-2K7QMB", "link"),
+        Mention("RE-STORY-7F3K2Q", "link"),
+        Mention("RE-STORY-2K7QMB", "link"),
     }
 
 
 def test_find_mentions_link_relative_md_path_without_dotdot() -> None:
-    mentions = find_mentions("[x](RE-7F3K2Q.md)", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "link")]
+    mentions = find_mentions("[x](RE-STORY-7F3K2Q.md)", doc_path=DOC)
+    assert mentions == [Mention("RE-STORY-7F3K2Q", "link")]
 
 
 def test_find_mentions_wikilink_inside_markdown_link() -> None:
     # spec §5.2: ``[[RE-…]](x)`` — the wikilink counts, the target ``x`` does not
-    mentions = find_mentions("[[RE-7F3K2Q]](x)", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+    mentions = find_mentions("[[RE-STORY-7F3K2Q]](x)", doc_path=DOC)
+    assert mentions == [Mention("RE-STORY-7F3K2Q", "wikilink")]
 
 
 def test_find_mentions_wikilink_with_label_inside_markdown_link() -> None:
-    mentions = find_mentions("[[RE-7F3K2Q|label]](x)", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+    mentions = find_mentions("[[RE-STORY-7F3K2Q|label]](x)", doc_path=DOC)
+    assert mentions == [Mention("RE-STORY-7F3K2Q", "wikilink")]
 
 
 def test_find_mentions_link_text_with_inner_wikilink() -> None:
-    mentions = find_mentions("[see [[RE-7F3K2Q]] info](x)", doc_path=DOC)
-    assert mentions == [Mention("RE-7F3K2Q", "wikilink")]
+    mentions = find_mentions("[see [[RE-STORY-7F3K2Q]] info](x)", doc_path=DOC)
+    assert mentions == [Mention("RE-STORY-7F3K2Q", "wikilink")]
 
 
 def test_find_mentions_code_span_in_link_text_is_ignored() -> None:
-    assert find_mentions("[`RE-7F3K2Q`](x)", doc_path=DOC) == []
+    assert find_mentions("[`RE-STORY-7F3K2Q`](x)", doc_path=DOC) == []
 
 
 def test_find_mentions_deduplicates() -> None:
-    body = "[[RE-7F3K2Q]] and [[RE-7F3K2Q|again]]"
-    assert find_mentions(body, doc_path=DOC) == [Mention("RE-7F3K2Q", "wikilink")]
-    body = "[RE-7F3K2Q](RE-7F3K2Q)"
-    assert find_mentions(body, doc_path=DOC) == [Mention("RE-7F3K2Q", "link")]
+    body = "[[RE-STORY-7F3K2Q]] and [[RE-STORY-7F3K2Q|again]]"
+    assert find_mentions(body, doc_path=DOC) == [Mention("RE-STORY-7F3K2Q", "wikilink")]
+    body = "[RE-STORY-7F3K2Q](RE-STORY-7F3K2Q)"
+    assert find_mentions(body, doc_path=DOC) == [Mention("RE-STORY-7F3K2Q", "link")]
 
 
 def test_find_mentions_distinguishes_via() -> None:
-    body = "[[RE-7F3K2Q]] and [RE-7F3K2Q](x)"
+    body = "[[RE-STORY-7F3K2Q]] and [RE-STORY-7F3K2Q](x)"
     assert find_mentions(body, doc_path=DOC) == [
-        Mention("RE-7F3K2Q", "wikilink"),
-        Mention("RE-7F3K2Q", "link"),
+        Mention("RE-STORY-7F3K2Q", "wikilink"),
+        Mention("RE-STORY-7F3K2Q", "link"),
     ]
 
 
 def test_find_mentions_returns_cr_ids_raw() -> None:
-    body = "[[RE-3M9XA1]] and [[RE-7F3K2Q]]"
+    body = "[[RE-CHG-3M9XA1]] and [[RE-STORY-7F3K2Q]]"
     assert [m.id for m in find_mentions(body, doc_path=DOC)] == [
-        "RE-3M9XA1",
-        "RE-7F3K2Q",
+        "RE-CHG-3M9XA1",
+        "RE-STORY-7F3K2Q",
     ]
 
 
 def test_find_mentions_image_assets_do_not_mention() -> None:
-    body = "![a](../../assets/RE-7F3K2Q/f.png) and [d](../../assets/RE-2K7QMB/g.png)"
+    body = (
+        "![a](../../assets/RE-STORY-7F3K2Q/f.png) and "
+        "[d](../../assets/RE-STORY-2K7QMB/g.png)"
+    )
     assert find_mentions(body, doc_path=DOC) == []
 
 
 def test_find_mentions_asset_target_excludes_id_text() -> None:
     # asset links are never mentions, even when the link text is an ID (§5.2)
-    body = "[RE-7F3K2Q](../../assets/RE-7F3K2Q/g.png)"
+    body = "[RE-STORY-7F3K2Q](../../assets/RE-STORY-7F3K2Q/g.png)"
     assert find_mentions(body, doc_path=DOC) == []
 
 
 def test_find_mentions_rejects_non_ids() -> None:
     assert find_mentions("7F3K2Q", doc_path=DOC) == []
-    assert find_mentions("RE-7F3K2", doc_path=DOC) == []
-    assert find_mentions("RE-7F3K2QX", doc_path=DOC) == []
-    assert find_mentions("RE-7F3K2I", doc_path=DOC) == []
-    assert find_mentions("RE-7F3K2U", doc_path=DOC) == []
-    assert find_mentions("RE-7F3K2O", doc_path=DOC) == []
+    assert find_mentions("RE-STORY-7F3K2", doc_path=DOC) == []
+    assert find_mentions("RE-STORY-7F3K2QX", doc_path=DOC) == []
+    assert find_mentions("RE-STORY-7F3K2I", doc_path=DOC) == []
+    assert find_mentions("RE-STORY-7F3K2U", doc_path=DOC) == []
+    assert find_mentions("RE-STORY-7F3K2O", doc_path=DOC) == []
 
 
 def test_find_mentions_boundaries() -> None:
-    body = "([[RE-7F3K2Q]]) and [[RE-7F3K2Q|note]] and [x](RE-7F3K2Q)"
+    body = "([[RE-STORY-7F3K2Q]]) and [[RE-STORY-7F3K2Q|note]] and [x](RE-STORY-7F3K2Q)"
     mentions = find_mentions(body, doc_path=DOC)
-    assert [m.id for m in mentions] == ["RE-7F3K2Q", "RE-7F3K2Q"]
+    assert [m.id for m in mentions] == ["RE-STORY-7F3K2Q", "RE-STORY-7F3K2Q"]
     assert mentions[0].via == "wikilink"
     assert mentions[1].via == "link"
 
 
 def test_find_mentions_glued_word_is_prose() -> None:
-    body = "seeRE-7F3K2Q"
+    body = "seeRE-STORY-7F3K2Q"
     assert find_mentions(body, doc_path=DOC) == []
 
 
 def test_find_mentions_in_heading() -> None:
-    body = "## See RE-7F3K2Q\n\ntext\n"
+    body = "## See RE-STORY-7F3K2Q\n\ntext\n"
     assert find_mentions(body, doc_path=DOC) == []
-    body = "## See [[RE-7F3K2Q]]\n\ntext\n"
-    assert find_mentions(body, doc_path=DOC) == [Mention("RE-7F3K2Q", "wikilink")]
+    body = "## See [[RE-STORY-7F3K2Q]]\n\ntext\n"
+    assert find_mentions(body, doc_path=DOC) == [Mention("RE-STORY-7F3K2Q", "wikilink")]
 
 
 def test_resolve_asset_ref_own_folder() -> None:
     ref = resolve_asset_ref(
-        "../../assets/RE-7F3K2Q/file.png", doc_path=DOC, doc_id=DOC_ID
+        "../../assets/RE-STORY-7F3K2Q/file.png", doc_path=DOC, doc_id=DOC_ID
     )
     assert ref == AssetRef(
-        raw="../../assets/RE-7F3K2Q/file.png",
-        path=Path("assets/RE-7F3K2Q/file.png"),
-        owner="RE-7F3K2Q",
+        raw="../../assets/RE-STORY-7F3K2Q/file.png",
+        path=Path("assets/RE-STORY-7F3K2Q/file.png"),
+        owner="RE-STORY-7F3K2Q",
         foreign=False,
     )
 
 
 def test_resolve_asset_ref_foreign_folder() -> None:
     ref = resolve_asset_ref(
-        "../../assets/RE-2K7QMB/file.png", doc_path=DOC, doc_id=DOC_ID
+        "../../assets/RE-STORY-2K7QMB/file.png", doc_path=DOC, doc_id=DOC_ID
     )
     assert ref is not None
-    assert ref.owner == "RE-2K7QMB"
+    assert ref.owner == "RE-STORY-2K7QMB"
     assert ref.foreign
 
 
 def test_resolve_asset_ref_owner_case_insensitive() -> None:
     ref = resolve_asset_ref(
-        "../../assets/re-7f3k2q/file.png", doc_path=DOC, doc_id=DOC_ID
+        "../../assets/re-story-7f3k2q/file.png", doc_path=DOC, doc_id=DOC_ID
     )
     assert ref is not None
     assert not ref.foreign
@@ -392,22 +402,22 @@ def test_resolve_asset_ref_owner_case_insensitive() -> None:
 
 def test_resolve_asset_ref_nested_dotdot_normalisation() -> None:
     ref = resolve_asset_ref(
-        "../../documents/../assets/RE-7F3K2Q/./sub/../file.png",
+        "../../documents/../assets/RE-STORY-7F3K2Q/./sub/../file.png",
         doc_path=DOC,
         doc_id=DOC_ID,
     )
     assert ref is not None
-    assert ref.path == Path("assets/RE-7F3K2Q/file.png")
+    assert ref.path == Path("assets/RE-STORY-7F3K2Q/file.png")
 
 
 def test_resolve_asset_ref_nested_path_kept() -> None:
     ref = resolve_asset_ref(
-        "../../assets/RE-7F3K2Q/nested/dir/file.png",
+        "../../assets/RE-STORY-7F3K2Q/nested/dir/file.png",
         doc_path=DOC,
         doc_id=DOC_ID,
     )
     assert ref is not None
-    assert ref.path == Path("assets/RE-7F3K2Q/nested/dir/file.png")
+    assert ref.path == Path("assets/RE-STORY-7F3K2Q/nested/dir/file.png")
 
 
 def test_resolve_asset_ref_non_asset_targets() -> None:
@@ -416,16 +426,18 @@ def test_resolve_asset_ref_non_asset_targets() -> None:
         is None
     )
     assert (
-        resolve_asset_ref("/assets/RE-7F3K2Q/f.png", doc_path=DOC, doc_id=DOC_ID)
+        resolve_asset_ref("/assets/RE-STORY-7F3K2Q/f.png", doc_path=DOC, doc_id=DOC_ID)
         is None
     )
     assert (
         resolve_asset_ref("../../assets/file.png", doc_path=DOC, doc_id=DOC_ID) is None
     )
-    assert resolve_asset_ref("../RE-2K7QMB.png", doc_path=DOC, doc_id=DOC_ID) is None
+    assert (
+        resolve_asset_ref("../RE-STORY-2K7QMB.png", doc_path=DOC, doc_id=DOC_ID) is None
+    )
     assert (
         resolve_asset_ref(
-            "../../../assets/RE-7F3K2Q/file.png", doc_path=DOC, doc_id=DOC_ID
+            "../../../assets/RE-STORY-7F3K2Q/file.png", doc_path=DOC, doc_id=DOC_ID
         )
         is None
     )
@@ -434,25 +446,25 @@ def test_resolve_asset_ref_non_asset_targets() -> None:
 def test_find_asset_refs_images_and_links() -> None:
     body = (
         "# T\n\n"
-        "![a](../../assets/RE-7F3K2Q/f.png)\n\n"
-        "[diagram](../../assets/RE-7F3K2Q/g.png)\n\n"
+        "![a](../../assets/RE-STORY-7F3K2Q/f.png)\n\n"
+        "[diagram](../../assets/RE-STORY-7F3K2Q/g.png)\n\n"
         "![ext](https://example.com/x.png)\n"
     )
     refs = find_asset_refs(body, doc_path=DOC, doc_id=DOC_ID)
     assert [r.path for r in refs] == [
-        Path("assets/RE-7F3K2Q/f.png"),
-        Path("assets/RE-7F3K2Q/g.png"),
+        Path("assets/RE-STORY-7F3K2Q/f.png"),
+        Path("assets/RE-STORY-7F3K2Q/g.png"),
     ]
     assert all(not r.foreign for r in refs)
 
 
 def test_find_asset_refs_foreign_flagged() -> None:
-    body = "![a](../../assets/RE-2K7QMB/f.png)\n"
+    body = "![a](../../assets/RE-STORY-2K7QMB/f.png)\n"
     refs = find_asset_refs(body, doc_path=DOC, doc_id=DOC_ID)
     assert len(refs) == 1
     assert refs[0].foreign
 
 
 def test_find_asset_refs_ignores_fenced_code() -> None:
-    body = "```\n![a](../../assets/RE-7F3K2Q/f.png)\n```\n"
+    body = "```\n![a](../../assets/RE-STORY-7F3K2Q/f.png)\n```\n"
     assert find_asset_refs(body, doc_path=DOC, doc_id=DOC_ID) == []

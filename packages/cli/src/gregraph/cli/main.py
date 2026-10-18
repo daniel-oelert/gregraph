@@ -34,7 +34,7 @@ from pydantic import ValidationError
 from gregraph import __version__
 from gregraph.cli import webui
 from gregraph.cli.output import Output, error_envelope
-from gregraph.core.config import read_config
+from gregraph.core.config import ConfigSchemaError, read_config
 from gregraph.core.git import GitAdapter, NoteSuppressor, NullGitAdapter
 from gregraph.core.models import OperationRefused
 from gregraph.core.storage import config_path
@@ -1057,6 +1057,12 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_REFUSED
         out.finding(exc.finding)
         return EXIT_REFUSED
+    except ConfigSchemaError as exc:
+        if out.json_mode:
+            out.json(error_envelope("E-ENV", EXIT_ENV, str(exc)))
+            return EXIT_ENV
+        out.error(str(exc))
+        return EXIT_ENV
     except ValidationError as exc:
         if out.json_mode:
             out.json(error_envelope("E-ENV", EXIT_ENV, f"invalid data: {exc}"))

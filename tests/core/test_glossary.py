@@ -121,7 +121,7 @@ def write_term(
     write_sidecar(root / GLOSSARY / f"{file_stem}.json", model)
 
 
-def write_doc(root: Path, body: str, doc_id: str = "RE-AAAAAA") -> None:
+def write_doc(root: Path, body: str, doc_id: str = "RE-STORY-AAAAAA") -> None:
     directory = root / "documents" / "user-stories"
     directory.mkdir(parents=True, exist_ok=True)
     document = Document(
@@ -546,8 +546,8 @@ class TestTermUsage:
         expected = (
             (
                 TermMention(
-                    id="RE-AAAAAA",
-                    path=Path("documents/user-stories/RE-AAAAAA.md"),
+                    id="RE-STORY-AAAAAA",
+                    path=Path("documents/user-stories/RE-STORY-AAAAAA.md"),
                     matched=matched,
                 ),
             )
@@ -558,21 +558,23 @@ class TestTermUsage:
 
     def test_usage_lists_documents_sorted_with_matches(self, tmp_repo: Path) -> None:
         write_term(tmp_repo, "knowledge-base", "Knowledge base", aliases=["KB"])
-        write_doc(tmp_repo, "# A\n\nUses KB and the knowledge base.\n", "RE-AAAAAA")
-        write_doc(tmp_repo, "# B\n\nUses only KB.\n", "RE-BBBBBB")
-        write_doc(tmp_repo, "# C\n\nUses neither.\n", "RE-CCCCCC")
+        write_doc(
+            tmp_repo, "# A\n\nUses KB and the knowledge base.\n", "RE-STORY-AAAAAA"
+        )
+        write_doc(tmp_repo, "# B\n\nUses only KB.\n", "RE-STORY-BBBBBB")
+        write_doc(tmp_repo, "# C\n\nUses neither.\n", "RE-STORY-CCCCCC")
         result = term_usage(Workspace.open(tmp_repo), "knowledge-base")
         assert result.slug == "knowledge-base"
         assert result.term == "Knowledge base"
         assert result.mentions == (
             TermMention(
-                id="RE-AAAAAA",
-                path=Path("documents/user-stories/RE-AAAAAA.md"),
+                id="RE-STORY-AAAAAA",
+                path=Path("documents/user-stories/RE-STORY-AAAAAA.md"),
                 matched=("Knowledge base", "KB"),
             ),
             TermMention(
-                id="RE-BBBBBB",
-                path=Path("documents/user-stories/RE-BBBBBB.md"),
+                id="RE-STORY-BBBBBB",
+                path=Path("documents/user-stories/RE-STORY-BBBBBB.md"),
                 matched=("KB",),
             ),
         )
@@ -594,10 +596,10 @@ class TestTermUsage:
 
     def test_usage_special_characters(self, tmp_repo: Path) -> None:
         write_term(tmp_repo, "c", "C++")
-        write_doc(tmp_repo, "# Sample\n\nWritten in C++ today.\n", "RE-AAAAAA")
-        write_doc(tmp_repo, "# Sample\n\nThe C++17 standard.\n", "RE-BBBBBB")
+        write_doc(tmp_repo, "# Sample\n\nWritten in C++ today.\n", "RE-STORY-AAAAAA")
+        write_doc(tmp_repo, "# Sample\n\nThe C++17 standard.\n", "RE-STORY-BBBBBB")
         result = term_usage(Workspace.open(tmp_repo), "c")
-        assert [mention.id for mention in result.mentions] == ["RE-AAAAAA"]
+        assert [mention.id for mention in result.mentions] == ["RE-STORY-AAAAAA"]
 
 
 # --------------------------------------------------------------------------
@@ -610,8 +612,10 @@ class TestTermRename:
         install_term_template(tmp_repo)
         ws = Workspace.open(tmp_repo)
         term_add(ws, term="Knowledge base", aliases=["KB"])
-        write_doc(tmp_repo, "# Sample\n\nThe knowledge base and KB.\n", "RE-AAAAAA")
-        write_doc(tmp_repo, "# Sample\n\nUnrelated.\n", "RE-BBBBBB")
+        write_doc(
+            tmp_repo, "# Sample\n\nThe knowledge base and KB.\n", "RE-STORY-AAAAAA"
+        )
+        write_doc(tmp_repo, "# Sample\n\nUnrelated.\n", "RE-STORY-BBBBBB")
 
         result = term_rename(ws, "knowledge-base", "Project wiki")
         assert isinstance(result, TermRenameResult)
@@ -624,8 +628,8 @@ class TestTermRename:
         assert result.sidecar == GLOSSARY / "project-wiki.json"
         assert result.mentions == (
             TermMention(
-                id="RE-AAAAAA",
-                path=Path("documents/user-stories/RE-AAAAAA.md"),
+                id="RE-STORY-AAAAAA",
+                path=Path("documents/user-stories/RE-STORY-AAAAAA.md"),
                 matched=("Knowledge base", "KB"),
             ),
         )
@@ -641,7 +645,9 @@ class TestTermRename:
         assert text.startswith("# Project wiki\n")
 
         # prose is human-owned: mentions are listed, never rewritten
-        doc_body = read_body(tmp_repo / "documents" / "user-stories" / "RE-AAAAAA.md")
+        doc_body = read_body(
+            tmp_repo / "documents" / "user-stories" / "RE-STORY-AAAAAA.md"
+        )
         assert "The knowledge base and KB." in doc_body
 
     def test_rename_leaves_body_hash_for_the_reconcile_pass(
@@ -677,7 +683,7 @@ class TestTermRename:
         install_term_template(tmp_repo)
         ws = Workspace.open(tmp_repo)
         term_add(ws, term="Knowledge base", aliases=["KB", "k-base"])
-        write_doc(tmp_repo, "# Sample\n\nOnly k-base here.\n", "RE-AAAAAA")
+        write_doc(tmp_repo, "# Sample\n\nOnly k-base here.\n", "RE-STORY-AAAAAA")
         result = term_rename(ws, "knowledge-base", "Project wiki")
         assert result.mentions[0].matched == ("k-base",)
 

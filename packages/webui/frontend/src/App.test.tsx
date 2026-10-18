@@ -29,7 +29,7 @@ describe("App shell", () => {
     const cards = await screen.findByRole("region", { name: "Status summary" });
     expect(within(cards).getByText("draft")).toBeInTheDocument();
     expect(within(cards).getByText("active")).toBeInTheDocument();
-    expect(within(cards).getByRole("button", { name: "RE-BBBBBB refines RE-AAAAAA" })).toBeInTheDocument();
+    expect(within(cards).getByRole("button", { name: "RE-GOAL-BBBBBB refines RE-FEAT-AAAAAA" })).toBeInTheDocument();
     expect(status.counts.active).toBe(2);
   });
 
@@ -58,9 +58,9 @@ describe("App status labels", () => {
     const user = userEvent.setup();
     render(<App session={session} api={api} />);
 
-    await user.click(await screen.findByRole("button", { name: "RE-BBBBBB refines RE-AAAAAA" }));
+    await user.click(await screen.findByRole("button", { name: "RE-GOAL-BBBBBB refines RE-FEAT-AAAAAA" }));
 
-    expect(api.getDocument).toHaveBeenLastCalledWith("RE-BBBBBB");
+    expect(api.getDocument).toHaveBeenLastCalledWith("RE-GOAL-BBBBBB");
     expect(await screen.findByRole("heading", { name: "Self-service" })).toBeInTheDocument();
   });
 });
@@ -88,7 +88,7 @@ describe("App documents", () => {
     await user.click(await screen.findByRole("button", { name: /Upload documents/ }));
 
     expect(await screen.findByRole("heading", { name: "Upload documents" })).toBeInTheDocument();
-    expect(api.getDocument).toHaveBeenCalledWith("RE-AAAAAA");
+    expect(api.getDocument).toHaveBeenCalledWith("RE-FEAT-AAAAAA");
     expect(screen.getByRole("list", { name: "Outbound links" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Inbound links" })).toBeInTheDocument();
   });
@@ -127,7 +127,7 @@ describe("App documents", () => {
 
     expect(confirm).toHaveBeenCalled();
     expect(screen.getByLabelText("Markdown body")).toHaveValue("unsaved");
-    expect(api.getDocument).not.toHaveBeenCalledWith("RE-BBBBBB");
+    expect(api.getDocument).not.toHaveBeenCalledWith("RE-GOAL-BBBBBB");
   });
 
   it("refetches the list, status, validation, and graph after a mutation", async () => {
@@ -139,7 +139,7 @@ describe("App documents", () => {
     const listCalls = vi.mocked(api.listDocuments).mock.calls.length;
     const statusCalls = vi.mocked(api.getStatus).mock.calls.length;
 
-    await user.click(screen.getByRole("button", { name: "Remove refines link to RE-BBBBBB" }));
+    await user.click(screen.getByRole("button", { name: "Remove refines link to RE-GOAL-BBBBBB" }));
 
     await waitFor(() => expect(vi.mocked(api.listDocuments).mock.calls.length).toBeGreaterThan(listCalls));
     expect(vi.mocked(api.getStatus).mock.calls.length).toBeGreaterThan(statusCalls);
@@ -210,7 +210,7 @@ describe("App create request in flight", () => {
     const api = makeApi({
       createDocument: vi.fn(() => pending.promise),
       getDocument: vi.fn(async (id: string) =>
-        id === "RE-NEW001" ? { ...docA, id, title: "New thing", body_text: "# New thing" } : docA,
+        id === "RE-FEAT-NEW001" ? { ...docA, id, title: "New thing", body_text: "# New thing" } : docA,
       ),
     });
     const user = userEvent.setup();
@@ -227,7 +227,7 @@ describe("App create request in flight", () => {
     expect(screen.getByRole("dialog", { name: "Create document" })).toBeInTheDocument();
     expect(heading.closest("[inert]")).not.toBeNull();
 
-    pending.resolve({ id: "RE-NEW001", notices: [], findings: [] });
+    pending.resolve({ id: "RE-FEAT-NEW001", notices: [], findings: [] });
 
     expect(await screen.findByRole("heading", { name: "New thing" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Create document" })).toBeNull();
@@ -239,7 +239,7 @@ describe("App create dialog", () => {
   it("omits the system cr type, creates a document, and selects it", async () => {
     const api = makeApi({
       listDocuments: vi.fn(async () => ({ items: [], notices: [] })),
-      getDocument: vi.fn(async () => ({ ...docA, id: "RE-NEW001", title: "New thing", body_text: "# New thing" })),
+      getDocument: vi.fn(async () => ({ ...docA, id: "RE-FEAT-NEW001", title: "New thing", body_text: "# New thing" })),
     });
     const user = userEvent.setup();
     render(<App session={{ ...session, types: [...session.types, { name: "cr", kind: "system" }] }} api={api} />);
@@ -254,7 +254,7 @@ describe("App create dialog", () => {
 
     expect(api.createDocument).toHaveBeenCalledWith({ type: "feature", title: "New thing", tags: [] });
     expect(await screen.findByRole("heading", { name: "New thing" })).toBeInTheDocument();
-    expect(api.getDocument).toHaveBeenCalledWith("RE-NEW001");
+    expect(api.getDocument).toHaveBeenCalledWith("RE-FEAT-NEW001");
     expect(screen.queryByRole("dialog", { name: "Create document" })).toBeNull();
   });
 
@@ -295,7 +295,7 @@ describe("App graph and validation", () => {
     render(<App session={session} api={api} />);
 
     await user.click(screen.getByRole("button", { name: "Graph" }));
-    const node = await screen.findByRole("button", { name: /RE-BBBBBB.*Self-service/ });
+    const node = await screen.findByRole("button", { name: /RE-GOAL-BBBBBB.*Self-service/ });
     node.focus();
     await user.keyboard("{Enter}");
 
@@ -312,7 +312,7 @@ describe("App graph and validation", () => {
     await user.click(screen.getByRole("button", { name: "Graph" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(/truncated.*300/i);
-    expect(screen.getByRole("button", { name: /RE-AAAAAA/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /RE-FEAT-AAAAAA/ })).toBeInTheDocument();
   });
 
   it("selects the document behind a validation finding", async () => {
@@ -321,7 +321,7 @@ describe("App graph and validation", () => {
     render(<App session={session} api={api} />);
 
     await user.click(screen.getByRole("button", { name: "Validation" }));
-    await user.click(await screen.findByRole("button", { name: "Open RE-BBBBBB" }));
+    await user.click(await screen.findByRole("button", { name: "Open RE-GOAL-BBBBBB" }));
 
     expect(screen.getByRole("button", { name: "Documents" })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { name: "Self-service" })).toBeInTheDocument();

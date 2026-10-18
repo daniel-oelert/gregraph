@@ -178,7 +178,7 @@ def test_deprecate_unknown_id_is_refused(
                 "--repo",
                 str(repo),
                 "deprecate",
-                "RE-NOSUCH",
+                "RE-STORY-ZZZZZZ",
                 "--reason",
                 "x",
                 "--no-input",

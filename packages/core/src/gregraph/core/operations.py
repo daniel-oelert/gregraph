@@ -54,7 +54,12 @@ from gregraph.core.hashing import (
     effective_content_changed,
     normalise_body,
 )
-from gregraph.core.ids import generate_id, is_valid_prefix, normalise_id
+from gregraph.core.ids import (
+    CR_ABBREVIATION,
+    generate_id,
+    is_valid_prefix,
+    normalise_id,
+)
 from gregraph.core.markdown import (
     Section,
     extract_title,
@@ -948,7 +953,11 @@ def create_document(
         version=template_version,
         allow_deprecated=allow_deprecated,
     )
-    generated = generate_id(_existing_ids(workspace), workspace.config.ids.prefix)
+    generated = generate_id(
+        _existing_ids(workspace),
+        workspace.config.ids.prefix,
+        spec.abbreviation,
+    )
     created = _now()
     identity = workspace.git.identity()
     author = identity.name if identity is not None else ""
@@ -1893,7 +1902,11 @@ def supersede(
             )
         )
     picked = _pick_template(workspace, spec.template, version=None)
-    generated = generate_id(_existing_ids(workspace), workspace.config.ids.prefix)
+    generated = generate_id(
+        _existing_ids(workspace),
+        workspace.config.ids.prefix,
+        spec.abbreviation,
+    )
     created = _now()
     identity = workspace.git.identity()
     author = identity.name if identity is not None else ""
@@ -4901,8 +4914,20 @@ def repair_regenerate_id(workspace: Workspace, path: Path) -> RepairIdResult:
                 message=f"id {document.id!r} must equal the filename stem {old_id!r}",
             )
         )
+    spec = workspace.config.types.get(document.type)
+    if spec is None:
+        raise OperationRefused(
+            Finding(
+                code="E-TYPE-UNKNOWN",
+                severity="E",
+                subject=document.type,
+                message=(f"cannot regenerate an ID for unknown type {document.type!r}"),
+            )
+        )
     generated = generate_id(
-        _existing_ids(workspace) | {old_id}, workspace.config.ids.prefix
+        _existing_ids(workspace) | {old_id},
+        workspace.config.ids.prefix,
+        spec.abbreviation,
     )
     body_rel = target.body.relative_to(root)
     sidecar_rel = target.sidecar.relative_to(root)
@@ -5088,6 +5113,7 @@ def _kind_tuple(kinds: Set[str]) -> tuple[str, ...]:
 class SchemaTypeInfo:
     """One configured type of ``describe_schema`` (AGENT_READINESS §4.1)."""
 
+    abbreviation: str
     kind: str
     folder: str
     template: str
@@ -5140,6 +5166,7 @@ class SchemaInfo:
     schema_: int
     tool_version: str
     id_prefix: str
+    cr_abbreviation: str
     baseline_branch: str
     versioning: dict[str, Any]
     graph: dict[str, Any]
@@ -5185,6 +5212,7 @@ def describe_schema(workspace: Workspace, *, type: str | None = None) -> SchemaI
         spec = config_types[name]
         chosen = active.get(spec.template)
         types[name] = SchemaTypeInfo(
+            abbreviation=spec.abbreviation,
             kind=spec.kind,
             folder=spec.folder,
             template=spec.template,
@@ -5248,6 +5276,7 @@ def describe_schema(workspace: Workspace, *, type: str | None = None) -> SchemaI
         schema_=workspace.config.gregraph.config_schema,
         tool_version=__version__,
         id_prefix=workspace.config.ids.prefix,
+        cr_abbreviation=CR_ABBREVIATION,
         baseline_branch=workspace.config.git.baseline_branch,
         versioning=dict(workspace.config.versioning.model_dump()),
         graph=dict(workspace.config.graph.model_dump()),

@@ -123,13 +123,13 @@ def test_document_detail_maps_outdated_links(client: TestClient, repo: Path) -> 
 
 
 def test_document_detail_unknown_id_is_a_finding(client: TestClient) -> None:
-    response = client.get("/api/documents/RE-ZZZZZZ")
+    response = client.get("/api/documents/RE-STORY-ZZZZZZ")
 
     assert response.status_code == 404
     error = response.json()["error"]
     assert error["code"] == "E-ID-UNKNOWN"
     assert error["severity"] == "E"
-    assert error["doc_id"] == "RE-ZZZZZZ"
+    assert error["doc_id"] == "RE-STORY-ZZZZZZ"
     assert "Traceback" not in response.text
 
 

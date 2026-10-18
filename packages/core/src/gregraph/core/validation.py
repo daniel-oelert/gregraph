@@ -52,7 +52,12 @@ from uuid import UUID
 from gregraph.core import changes
 from gregraph.core.config import Config
 from gregraph.core.hashing import asset_hash, body_hash, effective_content_changed
-from gregraph.core.ids import derive_id, split_id
+from gregraph.core.ids import (
+    CR_ABBREVIATION,
+    LEGACY_ID_PATTERN,
+    derive_id,
+    split_id,
+)
 from gregraph.core.markdown import (
     extract_title,
     find_asset_refs,
@@ -115,10 +120,12 @@ CODE_SEVERITIES: Final[dict[str, Severity]] = {
     "E-SIDECAR-INVALID": "E",
     "E-ID-FILENAME": "E",
     "E-ID-DERIVATION": "E",
+    "E-ID-LEGACY": "E",
     "E-ID-DUPLICATE": "E",
     "E-UUID-DUPLICATE": "E",
     "E-TYPE-UNKNOWN": "E",
     "E-TYPE-KIND-CHANGED": "E",
+    "E-TYPE-ABBREVIATION-CHANGED": "E",
     "E-TITLE-MISSING": "E",
     "E-FRONTMATTER-FORBIDDEN": "E",
     "E-TEMPLATE-UNKNOWN": "E",
@@ -319,13 +326,28 @@ def check_load_findings(ctx: ValidationContext, out: FindingCollector) -> None:
     out.extend(ctx.workspace.index.findings)
 
 
+def _entity_abbreviation(
+    ctx: ValidationContext, model: Document | ChangeRequest
+) -> str | None:
+    """The expected type/CR abbreviation for one ID entity (spec §4.3).
+
+    Change requests always use ``CR_ABBREVIATION``. A document whose type is
+    absent from config has no expectation here; ``E-TYPE-UNKNOWN`` reports it.
+    """
+    if isinstance(model, ChangeRequest):
+        return CR_ABBREVIATION
+    spec = ctx.workspace.config.types.get(model.type)
+    return None if spec is None else spec.abbreviation
+
+
 def check_identifiers(ctx: ValidationContext, out: FindingCollector) -> None:
     """Identifier invariants over the shared document/CR ID space (§4.3–4.4).
 
-    Codes: ``E-ID-FILENAME``, ``E-ID-DERIVATION``, ``E-UUID-DUPLICATE``,
-    ``W-PREFIX-MISMATCH``. ``E-ID-DERIVATION`` follows §4.3/§14 literally: the
-    ID must derive from the UUID with the *configured* prefix, so a prefix
-    mismatch fails derivation *and* additionally warns ``W-PREFIX-MISMATCH``.
+    Codes: ``E-ID-FILENAME``, ``E-ID-DERIVATION``, ``E-ID-LEGACY``,
+    ``E-UUID-DUPLICATE``, ``W-PREFIX-MISMATCH``. The ID must derive from the
+    UUID with the configured prefix and the type abbreviation (documents) or
+    ``CHG`` (CRs). A two-segment pre-0.2 ID is reported as ``E-ID-LEGACY`` with
+    the migration script as its fix; the old form is never accepted.
     """
     prefix = ctx.workspace.config.ids.prefix
     seen_uuids: dict[UUID, tuple[str, Path]] = {}
@@ -337,21 +359,40 @@ def check_identifiers(ctx: ValidationContext, out: FindingCollector) -> None:
                 sidecar_rel,
                 f"id {model.id!r} does not match filename stem {stem!r}",
             )
-        expected = derive_id(model.uuid, prefix)
-        if model.id != expected:
+        abbreviation = _entity_abbreviation(ctx, model)
+        expected = (
+            None
+            if abbreviation is None
+            else derive_id(model.uuid, prefix, abbreviation)
+        )
+        legacy = LEGACY_ID_PATTERN.fullmatch(model.id) is not None
+        if legacy:
+            out.add(
+                "E-ID-LEGACY",
+                model.id,
+                f"id {model.id!r} uses the pre-0.2 two-segment format; "
+                f"run the migration script (expected {expected or 'a typed ID'})",
+                fix="python scripts/migrate_type_ids.py --apply",
+            )
+        elif expected is not None and model.id != expected:
             out.add(
                 "E-ID-DERIVATION",
                 model.id,
                 f"id {model.id!r} is not derivable from uuid {model.uuid} "
-                f"with prefix {prefix!r} (expected {expected})",
-                fix=f"gregraph repair regenerate-id {sidecar_rel.as_posix()}",
+                f"with prefix {prefix!r} and abbreviation {abbreviation!r} "
+                f"(expected {expected})",
+                fix=(
+                    None
+                    if isinstance(model, ChangeRequest)
+                    else f"gregraph repair regenerate-id {sidecar_rel.as_posix()}"
+                ),
             )
         parts = split_id(model.id)
-        if parts is not None and parts[0] != prefix:
+        if parts is not None and parts.prefix != prefix:
             out.add(
                 "W-PREFIX-MISMATCH",
                 model.id,
-                f"prefix {parts[0]!r} does not match configured prefix {prefix!r}",
+                f"prefix {parts.prefix!r} does not match configured prefix {prefix!r}",
             )
         prior = seen_uuids.get(model.uuid)
         if prior is not None:
@@ -368,12 +409,13 @@ def check_identifiers(ctx: ValidationContext, out: FindingCollector) -> None:
 
 
 def check_types(ctx: ValidationContext, out: FindingCollector) -> None:
-    """Type existence and kind immutability (spec §5.3, §16.5).
+    """Type existence, kind and abbreviation immutability (spec §5.3, §16.5).
 
-    Codes: ``E-TYPE-UNKNOWN``, ``E-TYPE-KIND-CHANGED``. The kind check compares
-    ``config.toml`` against ``cache.types_seen`` (the kind seen at last run)
-    and only fires while documents of the type exist — a kind change with no
-    documents is free (§5.3).
+    Codes: ``E-TYPE-UNKNOWN``, ``E-TYPE-KIND-CHANGED``,
+    ``E-TYPE-ABBREVIATION-CHANGED``. The immutability checks compare
+    ``config.toml`` against ``cache.types_seen``/``cache.type_abbreviations``
+    (the values seen at the last run) and only fire while documents of the type
+    exist — a change with no documents is free (§5.3).
     """
     config = ctx.workspace.config
     counts: dict[str, int] = {}
@@ -387,6 +429,7 @@ def check_types(ctx: ValidationContext, out: FindingCollector) -> None:
             )
         counts[doc.type] = counts.get(doc.type, 0) + 1
     seen = ctx.workspace.cache.types_seen
+    seen_abbreviations = ctx.workspace.cache.type_abbreviations
     for name, count in sorted(counts.items()):
         spec = config.types.get(name)
         if spec is None:
@@ -398,6 +441,18 @@ def check_types(ctx: ValidationContext, out: FindingCollector) -> None:
                 CONFIG_RELPATH,
                 f"type {name!r} kind changed from {previous!r} to {spec.kind!r} "
                 f"while {count} document(s) exist",
+            )
+        previous_abbreviation = seen_abbreviations.get(name)
+        if (
+            previous_abbreviation is not None
+            and previous_abbreviation != spec.abbreviation
+        ):
+            out.add(
+                "E-TYPE-ABBREVIATION-CHANGED",
+                CONFIG_RELPATH,
+                f"type {name!r} abbreviation changed from "
+                f"{previous_abbreviation!r} to {spec.abbreviation!r} while "
+                f"{count} document(s) exist; existing IDs cannot change",
             )
 
 
@@ -1170,6 +1225,7 @@ def refresh_cache(
     }
 
     types_seen: dict[str, str] = {}
+    type_abbreviations: dict[str, str] = {}
     for name in sorted(config.types):
         spec = config.types[name]
         previous = cache.types_seen.get(name)
@@ -1177,6 +1233,15 @@ def refresh_cache(
             types_seen[name] = previous
         else:
             types_seen[name] = spec.kind
+        previous_abbreviation = cache.type_abbreviations.get(name)
+        if (
+            name in occupied
+            and previous_abbreviation is not None
+            and previous_abbreviation != spec.abbreviation
+        ):
+            type_abbreviations[name] = previous_abbreviation
+        else:
+            type_abbreviations[name] = spec.abbreviation
 
     templates_seen: dict[str, str] = {}
     for name in sorted(templates):
@@ -1191,7 +1256,11 @@ def refresh_cache(
                 templates_seen[key] = current
 
     return cache.model_copy(
-        update={"types_seen": types_seen, "templates_seen": templates_seen}
+        update={
+            "types_seen": types_seen,
+            "type_abbreviations": type_abbreviations,
+            "templates_seen": templates_seen,
+        }
     )
 
 

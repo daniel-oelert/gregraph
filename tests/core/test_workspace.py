@@ -177,38 +177,38 @@ class TestLoadIndex:
         assert index.findings == ()
 
     def test_loads_documents_changes_terms(self, tmp_repo: Path) -> None:
-        write_document(tmp_repo, "user-story", make_document("RE-AAAAAA"))
-        body, sidecar = change_paths(Path(), "RE-BBBBBB")
+        write_document(tmp_repo, "user-story", make_document("RE-STORY-AAAAAA"))
+        body, sidecar = change_paths(Path(), "RE-CHG-BBBBBB")
         write_body(tmp_repo / body, "# Change something\n")
-        write_sidecar(tmp_repo / sidecar, make_change("RE-BBBBBB"))
+        write_sidecar(tmp_repo / sidecar, make_change("RE-CHG-BBBBBB"))
         body, sidecar = term_paths(Path(), "knowledge-base")
         write_body(tmp_repo / body, "# Knowledge Base\n")
         write_sidecar(tmp_repo / sidecar, make_term("knowledge-base"))
 
         index = load_index(tmp_repo)
-        assert set(index.documents) == {"RE-AAAAAA"}
-        assert set(index.changes) == {"RE-BBBBBB"}
+        assert set(index.documents) == {"RE-STORY-AAAAAA"}
+        assert set(index.changes) == {"RE-CHG-BBBBBB"}
         assert set(index.terms) == {"knowledge-base"}
         assert index.findings == ()
 
     def test_loads_documents_from_nested_folders(self, tmp_repo: Path) -> None:
-        write_document(tmp_repo, "feature", make_document("RE-AAAAAA"))
-        write_document(tmp_repo, "epic", make_document("RE-BBBBBB"))
+        write_document(tmp_repo, "feature", make_document("RE-FEAT-AAAAAA"))
+        write_document(tmp_repo, "epic", make_document("RE-EPIC-BBBBBB"))
         index = load_index(tmp_repo)
-        assert set(index.documents) == {"RE-AAAAAA", "RE-BBBBBB"}
+        assert set(index.documents) == {"RE-FEAT-AAAAAA", "RE-EPIC-BBBBBB"}
 
     def test_paths_are_repo_relative(self, tmp_repo: Path) -> None:
-        write_document(tmp_repo, "user-story", make_document("RE-AAAAAA"))
+        write_document(tmp_repo, "user-story", make_document("RE-STORY-AAAAAA"))
         index = load_index(tmp_repo)
-        loaded = index.documents["RE-AAAAAA"]
+        loaded = index.documents["RE-STORY-AAAAAA"]
         assert isinstance(loaded, Loaded)
         assert not loaded.body.is_absolute()
         assert not loaded.sidecar.is_absolute()
-        assert loaded.body == Path("documents/user-story/RE-AAAAAA.md")
-        assert loaded.sidecar == Path("documents/user-story/RE-AAAAAA.json")
+        assert loaded.body == Path("documents/user-story/RE-STORY-AAAAAA.md")
+        assert loaded.sidecar == Path("documents/user-story/RE-STORY-AAAAAA.json")
 
     def test_missing_sidecar_finding(self, tmp_repo: Path) -> None:
-        body, _ = document_paths(Path(), "user-story", "RE-AAAAAA")
+        body, _ = document_paths(Path(), "user-story", "RE-STORY-AAAAAA")
         write_body(tmp_repo / body, "# Orphan body\n")
         index = load_index(tmp_repo)
         assert index.documents == {}
@@ -218,17 +218,17 @@ class TestLoadIndex:
         assert finding.subject == body
 
     def test_missing_body_finding_but_document_loaded(self, tmp_repo: Path) -> None:
-        document = make_document("RE-AAAAAA")
-        _, sidecar = document_paths(Path(), "user-story", "RE-AAAAAA")
+        document = make_document("RE-STORY-AAAAAA")
+        _, sidecar = document_paths(Path(), "user-story", "RE-STORY-AAAAAA")
         write_sidecar(tmp_repo / sidecar, document)
         index = load_index(tmp_repo)
-        assert set(index.documents) == {"RE-AAAAAA"}
+        assert set(index.documents) == {"RE-STORY-AAAAAA"}
         [finding] = index.findings
         assert finding.code == "E-BODY-MISSING"
         assert finding.subject == sidecar
 
     def test_invalid_sidecar_finding(self, tmp_repo: Path) -> None:
-        _, sidecar = document_paths(Path(), "user-story", "RE-AAAAAA")
+        _, sidecar = document_paths(Path(), "user-story", "RE-STORY-AAAAAA")
         write_body(tmp_repo / sidecar.with_suffix(".md"), "# Broken\n")
         write_sidecar(tmp_repo / sidecar, {"schema": 1})
         index = load_index(tmp_repo)
@@ -238,7 +238,7 @@ class TestLoadIndex:
         assert finding.subject == sidecar
 
     def test_unparsable_json_finding(self, tmp_repo: Path) -> None:
-        _, sidecar = document_paths(Path(), "user-story", "RE-AAAAAA")
+        _, sidecar = document_paths(Path(), "user-story", "RE-STORY-AAAAAA")
         write_body(tmp_repo / sidecar.with_suffix(".md"), "# Broken\n")
         full_sidecar = tmp_repo / sidecar
         full_sidecar.parent.mkdir(parents=True, exist_ok=True)
@@ -248,60 +248,61 @@ class TestLoadIndex:
         assert finding.code == "E-SIDECAR-INVALID"
 
     def test_duplicate_id_keeps_first(self, tmp_repo: Path) -> None:
-        first = make_document("RE-AAAAAA", title="First")
-        second = make_document("RE-AAAAAA", title="Second")
+        first = make_document("RE-STORY-AAAAAA", title="First")
+        second = make_document("RE-STORY-AAAAAA", title="Second")
         write_document(tmp_repo, "epic", first)
         write_document(tmp_repo, "feature", second)
         index = load_index(tmp_repo)
-        assert set(index.documents) == {"RE-AAAAAA"}
-        assert index.documents["RE-AAAAAA"].model.title == "First"
+        assert set(index.documents) == {"RE-STORY-AAAAAA"}
+        assert index.documents["RE-STORY-AAAAAA"].model.title == "First"
         [finding] = index.findings
         assert finding.code == "E-ID-DUPLICATE"
-        assert finding.subject == "RE-AAAAAA"
+        assert finding.subject == "RE-STORY-AAAAAA"
 
     def test_duplicate_id_across_documents_and_changes(self, tmp_repo: Path) -> None:
-        write_document(tmp_repo, "user-story", make_document("RE-AAAAAA"))
-        body, sidecar = change_paths(Path(), "RE-AAAAAA")
+        write_document(tmp_repo, "user-story", make_document("RE-CHG-AAAAAA"))
+        body, sidecar = change_paths(Path(), "RE-CHG-AAAAAA")
         write_body(tmp_repo / body, "# Change\n")
-        write_sidecar(tmp_repo / sidecar, make_change("RE-AAAAAA"))
+        write_sidecar(tmp_repo / sidecar, make_change("RE-CHG-AAAAAA"))
         index = load_index(tmp_repo)
-        assert set(index.documents) == {"RE-AAAAAA"}
+        assert set(index.documents) == {"RE-CHG-AAAAAA"}
         assert index.changes == {}
         [finding] = index.findings
         assert finding.code == "E-ID-DUPLICATE"
-        assert finding.subject == "RE-AAAAAA"
+        assert finding.subject == "RE-CHG-AAAAAA"
 
     def test_documents_keep_links(self, tmp_repo: Path) -> None:
         document = make_document(
-            "RE-AAAAAA", links=[("refines", "RE-BBBBBB"), ("depends-on", "RE-CCCCCC")]
+            "RE-STORY-AAAAAA",
+            links=[("refines", "RE-STORY-BBBBBB"), ("depends-on", "RE-STORY-CCCCCC")],
         )
         write_document(tmp_repo, "user-story", document)
         index = load_index(tmp_repo)
-        loaded = index.documents["RE-AAAAAA"]
+        loaded = index.documents["RE-STORY-AAAAAA"]
         assert [link.target for link in loaded.model.links] == [
-            "RE-CCCCCC",
-            "RE-BBBBBB",
+            "RE-STORY-CCCCCC",
+            "RE-STORY-BBBBBB",
         ]
 
 
 class TestWorkspaceIndex:
     def test_index_is_lazy_and_cached(self, tmp_repo: Path) -> None:
-        write_document(tmp_repo, "user-story", make_document("RE-AAAAAA"))
+        write_document(tmp_repo, "user-story", make_document("RE-STORY-AAAAAA"))
         workspace = Workspace.open(tmp_repo)
         first = workspace.index
-        assert set(first.documents) == {"RE-AAAAAA"}
-        _, sidecar = document_paths(Path(), "user-story", "RE-BBBBBB")
-        write_document(tmp_repo, "user-story", make_document("RE-BBBBBB"))
+        assert set(first.documents) == {"RE-STORY-AAAAAA"}
+        _, sidecar = document_paths(Path(), "user-story", "RE-STORY-BBBBBB")
+        write_document(tmp_repo, "user-story", make_document("RE-STORY-BBBBBB"))
         assert workspace.index is first
-        assert set(workspace.index.documents) == {"RE-AAAAAA"}
+        assert set(workspace.index.documents) == {"RE-STORY-AAAAAA"}
 
     def test_reload_picks_up_changes(self, tmp_repo: Path) -> None:
-        write_document(tmp_repo, "user-story", make_document("RE-AAAAAA"))
+        write_document(tmp_repo, "user-story", make_document("RE-STORY-AAAAAA"))
         workspace = Workspace.open(tmp_repo)
-        assert set(workspace.index.documents) == {"RE-AAAAAA"}
-        write_document(tmp_repo, "user-story", make_document("RE-BBBBBB"))
+        assert set(workspace.index.documents) == {"RE-STORY-AAAAAA"}
+        write_document(tmp_repo, "user-story", make_document("RE-STORY-BBBBBB"))
         workspace.reload()
-        assert set(workspace.index.documents) == {"RE-AAAAAA", "RE-BBBBBB"}
+        assert set(workspace.index.documents) == {"RE-STORY-AAAAAA", "RE-STORY-BBBBBB"}
 
     def test_cache_is_lazy(self, tmp_repo: Path) -> None:
         workspace = Workspace.open(tmp_repo)
@@ -311,16 +312,16 @@ class TestWorkspaceIndex:
         assert (tmp_repo / CACHE_RELPATH).exists() is False
 
     def test_graph_is_lazy_and_cached(self, tmp_repo: Path) -> None:
-        write_document(tmp_repo, "user-story", make_document("RE-AAAAAA"))
+        write_document(tmp_repo, "user-story", make_document("RE-STORY-AAAAAA"))
         workspace = Workspace.open(tmp_repo)
         first = workspace.graph
-        assert set(first.nodes) == {"RE-AAAAAA"}
+        assert set(first.nodes) == {"RE-STORY-AAAAAA"}
         assert workspace.graph is first
 
     def test_index_exposes_typed_entries(self, tmp_repo: Path) -> None:
-        write_document(tmp_repo, "user-story", make_document("RE-AAAAAA"))
+        write_document(tmp_repo, "user-story", make_document("RE-STORY-AAAAAA"))
         index = load_index(tmp_repo)
         assert isinstance(index, Index)
-        loaded = index.documents["RE-AAAAAA"]
+        loaded = index.documents["RE-STORY-AAAAAA"]
         assert isinstance(loaded, Loaded)
         assert isinstance(loaded.model, Document)

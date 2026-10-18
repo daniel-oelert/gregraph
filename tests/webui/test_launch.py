@@ -114,7 +114,7 @@ def test_webui_distribution_metadata() -> None:
     ]
 
     assert project["name"] == "gregraph-webui"
-    assert project["version"] == core["version"] == "0.1.1"
+    assert project["version"] == core["version"] == "0.2.0"
     assert project["requires-python"] == ">=3.12"
     deps = project["dependencies"]
     assert f"gregraph-core=={core['version']}" in deps

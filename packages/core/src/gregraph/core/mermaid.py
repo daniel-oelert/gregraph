@@ -5,7 +5,7 @@ I/O, no printing; the caller writes the returned fenced block (spec §16.2).
 :func:`export_mermaid` renders a ``flowchart TD``/``LR`` diagram:
 
 - node id: the document ID with ``-`` removed (Mermaid dislikes hyphens);
-  label ``RE-XXXXXX<br/>title`` with the title truncated to 40 chars and
+  label ``RE-FEAT-XXXXXX<br/>title`` with the title truncated to 40 chars and
   Mermaid-escaped (``#`` → ``#35;`` then ``"`` → ``#quot;``);
 - node shape by kind: goal stadium ``(["…"])``, requirement rectangle
   ``["…"]``, design subroutine ``[["…"]]``, verification hexagon ``{{"…"}}``,
@@ -109,7 +109,7 @@ def escape_label(text: str) -> str:
 
 
 def node_label(doc_id: str, title: str) -> str:
-    """``RE-XXXXXX<br/>title`` with the title truncated to 40 chars (spec §15)."""
+    """``RE-FEAT-XXXXXX<br/>title`` with the title truncated to 40 chars (spec §15)."""
     return f"{doc_id}<br/>{escape_label(title[:TITLE_LIMIT])}"
 
 

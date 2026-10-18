@@ -33,7 +33,7 @@ from uuid import UUID
 
 from gregraph.core.git import GitAdapter
 from gregraph.core.hashing import asset_hash, body_hash, effective_content_changed
-from gregraph.core.ids import generate_id, normalise_id
+from gregraph.core.ids import CR_ABBREVIATION, generate_id, normalise_id
 from gregraph.core.markdown import (
     extract_title,
     find_asset_refs,
@@ -1451,7 +1451,11 @@ def new_change_request(
         raise ValueError("cr new needs a title")
     parsed = parse_scope_specs(scope_specs)
     picked = _pick_cr_template(workspace)
-    generated = generate_id(_existing_ids(workspace), workspace.config.ids.prefix)
+    generated = generate_id(
+        _existing_ids(workspace),
+        workspace.config.ids.prefix,
+        CR_ABBREVIATION,
+    )
     created = _now()
     identity = workspace.git.identity()
     author = identity.name if identity is not None else ""

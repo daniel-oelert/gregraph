@@ -150,7 +150,7 @@ def _uuid_for(doc_id: str) -> UUID:
     """Deterministic UUID whose §4.1 derivation is ``doc_id``."""
     parts = split_id(doc_id)
     assert parts is not None
-    return UUID(int=decode_body(parts[1]) << 98)
+    return UUID(int=decode_body(parts.body) << 98)
 
 
 def _write_doc(
@@ -220,9 +220,9 @@ def _simulate_commit_bump(root: Path, sidecar_rel: Path) -> Document:
 def test_template_list_reports_versions_and_counts(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
     _write_template(tmp_repo, "user-story", 2, deprecated=True)
-    _write_doc(tmp_repo, "RE-AAAAAA", template=("user-story", 1))
-    _write_doc(tmp_repo, "RE-BBBBBB", template=("user-story", 1))
-    _write_doc(tmp_repo, "RE-CCCCCC", template=("user-story", 2))
+    _write_doc(tmp_repo, "RE-STORY-AAAAAA", template=("user-story", 1))
+    _write_doc(tmp_repo, "RE-STORY-BBBBBB", template=("user-story", 1))
+    _write_doc(tmp_repo, "RE-STORY-CCCCCC", template=("user-story", 2))
     result = template_list(_workspace(tmp_repo, git=False))
     assert [t.name for t in result.templates] == ["user-story"]
     versions = result.templates[0].versions
@@ -312,33 +312,40 @@ def test_migrate_requires_a_selection(tmp_repo: Path) -> None:
 
 def test_migrate_rejects_conflicting_selection(tmp_repo: Path) -> None:
     with pytest.raises(ValueError):
-        migrate(_workspace(tmp_repo, git=False), doc_ids=["RE-AAAAAA"], select_all=True)
+        migrate(
+            _workspace(tmp_repo, git=False),
+            doc_ids=["RE-STORY-AAAAAA"],
+            select_all=True,
+        )
 
 
 def test_migrate_unknown_id_refused(tmp_repo: Path) -> None:
     with pytest.raises(OperationRefused) as excinfo:
-        migrate(_workspace(tmp_repo, git=False), doc_ids=["RE-NOSUCH"])
+        migrate(_workspace(tmp_repo, git=False), doc_ids=["RE-STORY-ZZZZZZ"])
     assert excinfo.value.finding.code == "E-ID-UNKNOWN"
 
 
 def test_migrate_selects_all_and_template(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
     _write_template(tmp_repo, "user-story", 2)
-    _write_doc(tmp_repo, "RE-AAAAAA", template=("user-story", 1))
-    _write_doc(tmp_repo, "RE-BBBBBB", template=("user-story", 1))
+    _write_doc(tmp_repo, "RE-STORY-AAAAAA", template=("user-story", 1))
+    _write_doc(tmp_repo, "RE-STORY-BBBBBB", template=("user-story", 1))
     result = migrate(_workspace(tmp_repo, git=False), select_all=True)
-    assert sorted(item.id for item in result.items) == ["RE-AAAAAA", "RE-BBBBBB"]
+    assert sorted(item.id for item in result.items) == [
+        "RE-STORY-AAAAAA",
+        "RE-STORY-BBBBBB",
+    ]
     result = migrate(_workspace(tmp_repo, git=False), template="user-story")
     assert len(result.items) == 2
     result = migrate(_workspace(tmp_repo, git=False), template="ghost")
     assert result.items == ()
-    result = migrate(_workspace(tmp_repo, git=False), doc_ids=["RE-AAAAAA"])
-    assert [item.id for item in result.items] == ["RE-AAAAAA"]
+    result = migrate(_workspace(tmp_repo, git=False), doc_ids=["RE-STORY-AAAAAA"])
+    assert [item.id for item in result.items] == ["RE-STORY-AAAAAA"]
 
 
 def test_migrate_up_to_date_is_skipped(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
-    _write_doc(tmp_repo, "RE-AAAAAA", template=("user-story", 1))
+    _write_doc(tmp_repo, "RE-STORY-AAAAAA", template=("user-story", 1))
     result = migrate(_workspace(tmp_repo, git=False), select_all=True)
     assert result.items[0].kind == "skipped"
 
@@ -360,13 +367,13 @@ def test_migrate_additive_in_place_bumps_on_next_commit(tmp_repo: Path) -> None:
             ("Outlook", False, "Look ahead."),
         ],
     )
-    sidecar_rel = _write_doc(tmp_repo, "RE-AAAAAA", template=("user-story", 1))
+    sidecar_rel = _write_doc(tmp_repo, "RE-STORY-AAAAAA", template=("user-story", 1))
     ws = _workspace(tmp_repo, git=False)
-    result = migrate(ws, doc_ids=["RE-AAAAAA"])
+    result = migrate(ws, doc_ids=["RE-STORY-AAAAAA"])
     item = result.items[0]
     assert item.kind == "in-place"
     assert item.inserted == ("Outlook",)
-    body = _read_body(tmp_repo, Path("documents/user-story/RE-AAAAAA.md"))
+    body = _read_body(tmp_repo, Path("documents/user-story/RE-STORY-AAAAAA.md"))
     assert "## Outlook" in body
     assert "*Look ahead.*" in body
     document = _read_doc(tmp_repo, sidecar_rel)
@@ -403,15 +410,15 @@ def test_migrate_renamed_headings(tmp_repo: Path) -> None:
     )
     _write_doc(
         tmp_repo,
-        "RE-AAAAAA",
+        "RE-STORY-AAAAAA",
         template=("user-story", 1),
         body="# Sample\n\n## Summary\nDone.\n\n## Motivation\nBecause.\n",
     )
-    result = migrate(_workspace(tmp_repo, git=False), doc_ids=["RE-AAAAAA"])
+    result = migrate(_workspace(tmp_repo, git=False), doc_ids=["RE-STORY-AAAAAA"])
     item = result.items[0]
     assert item.kind == "in-place"
     assert item.renamed == (("Motivation", "Rationale"),)
-    body = _read_body(tmp_repo, Path("documents/user-story/RE-AAAAAA.md"))
+    body = _read_body(tmp_repo, Path("documents/user-story/RE-STORY-AAAAAA.md"))
     assert "## Rationale" in body
     assert "## Motivation" not in body
     assert "Because." in body
@@ -432,12 +439,12 @@ def test_migrate_breaking_takes_supersede_path(tmp_repo: Path) -> None:
     )
     old_rel = _write_doc(
         tmp_repo,
-        "RE-AAAAAA",
+        "RE-STORY-AAAAAA",
         template=("user-story", 1),
         body="# Sample\n\n## Summary\nDone.\n\n## Custom\nExtra content.\n",
     )
     ws = _workspace(tmp_repo, git=False)
-    result = migrate(ws, doc_ids=["RE-AAAAAA"])
+    result = migrate(ws, doc_ids=["RE-STORY-AAAAAA"])
     item = result.items[0]
     assert item.kind == "superseding"
     assert item.new_id is not None
@@ -449,7 +456,8 @@ def test_migrate_breaking_takes_supersede_path(tmp_repo: Path) -> None:
     new = _read_doc(tmp_repo, new_rel)
     assert new.template == TemplateRef(name="user-story", version=2)
     assert any(
-        link.type == "supersedes" and link.target == "RE-AAAAAA" for link in new.links
+        link.type == "supersedes" and link.target == "RE-STORY-AAAAAA"
+        for link in new.links
     )
     body = _read_body(tmp_repo, new_rel.with_suffix(".md"))
     assert "## Unmapped content (migration)" in body
@@ -460,9 +468,9 @@ def test_migrate_breaking_takes_supersede_path(tmp_repo: Path) -> None:
 def test_migrate_supersede_flag_forces_superseding(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
     _write_template(tmp_repo, "user-story", 2)
-    _write_doc(tmp_repo, "RE-AAAAAA", template=("user-story", 1))
+    _write_doc(tmp_repo, "RE-STORY-AAAAAA", template=("user-story", 1))
     result = migrate(
-        _workspace(tmp_repo, git=False), doc_ids=["RE-AAAAAA"], supersede=True
+        _workspace(tmp_repo, git=False), doc_ids=["RE-STORY-AAAAAA"], supersede=True
     )
     assert result.items[0].kind == "superseding"
     assert result.items[0].new_id is not None
@@ -480,7 +488,7 @@ def test_migrate_dry_run_writes_nothing(tmp_repo: Path) -> None:
             ("Outlook", False, "Look ahead."),
         ],
     )
-    sidecar_rel = _write_doc(tmp_repo, "RE-AAAAAA", template=("user-story", 1))
+    sidecar_rel = _write_doc(tmp_repo, "RE-STORY-AAAAAA", template=("user-story", 1))
     before = sorted(p.name for p in (tmp_repo / "documents").rglob("*"))
     result = migrate(_workspace(tmp_repo, git=False), select_all=True, dry_run=True)
     assert result.dry_run is True
@@ -494,9 +502,9 @@ def test_migrate_to_explicit_version(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
     _write_template(tmp_repo, "user-story", 2)
     _write_template(tmp_repo, "user-story", 3)
-    sidecar_rel = _write_doc(tmp_repo, "RE-AAAAAA", template=("user-story", 1))
+    sidecar_rel = _write_doc(tmp_repo, "RE-STORY-AAAAAA", template=("user-story", 1))
     result = migrate(
-        _workspace(tmp_repo, git=False), doc_ids=["RE-AAAAAA"], to_version=2
+        _workspace(tmp_repo, git=False), doc_ids=["RE-STORY-AAAAAA"], to_version=2
     )
     assert result.items[0].to_version == 2
     assert _read_doc(tmp_repo, sidecar_rel).template.version == 2
@@ -504,9 +512,9 @@ def test_migrate_to_explicit_version(tmp_repo: Path) -> None:
 
 def test_migrate_missing_target_version_skipped(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
-    _write_doc(tmp_repo, "RE-AAAAAA", template=("user-story", 1))
+    _write_doc(tmp_repo, "RE-STORY-AAAAAA", template=("user-story", 1))
     result = migrate(
-        _workspace(tmp_repo, git=False), doc_ids=["RE-AAAAAA"], to_version=9
+        _workspace(tmp_repo, git=False), doc_ids=["RE-STORY-AAAAAA"], to_version=9
     )
     assert result.items[0].kind == "skipped"
 
@@ -519,8 +527,8 @@ def test_migrate_missing_target_version_skipped(tmp_repo: Path) -> None:
 def test_baseline_create_writes_manifest_tag_and_list_sees_it(repo: Path) -> None:
     """M4: the tag message contains the manifest; ``baseline list`` sees it."""
     _write_template(repo, "user-story", 1)
-    first = _write_doc(repo, "RE-AAAAAA", title="First")
-    second = _write_doc(repo, "RE-BBBBBB", title="Second")
+    first = _write_doc(repo, "RE-STORY-AAAAAA", title="First")
+    second = _write_doc(repo, "RE-STORY-BBBBBB", title="Second")
     _commit_all(repo, "add docs")
     ws = _workspace(repo)
     result = baseline_create(ws, "base-1", message="Release 1")
@@ -534,23 +542,23 @@ def test_baseline_create_writes_manifest_tag_and_list_sees_it(repo: Path) -> Non
     assert manifest["id_prefix"] == "RE"
     assert manifest["tool_version"]
     entries = {entry["id"]: entry for entry in manifest["documents"]}
-    assert set(entries) == {"RE-AAAAAA", "RE-BBBBBB"}
-    assert entries["RE-AAAAAA"]["version"] == 1
-    assert entries["RE-AAAAAA"]["body_hash"] == body_hash(
+    assert set(entries) == {"RE-STORY-AAAAAA", "RE-STORY-BBBBBB"}
+    assert entries["RE-STORY-AAAAAA"]["version"] == 1
+    assert entries["RE-STORY-AAAAAA"]["body_hash"] == body_hash(
         _read_body(repo, first.with_suffix(".md"))
     )
-    assert entries["RE-AAAAAA"]["status"] in {"draft", "active", "unknown"}
-    assert entries["RE-BBBBBB"]["status"] in {"draft", "active", "unknown"}
-    assert second.stem == "RE-BBBBBB"
+    assert entries["RE-STORY-AAAAAA"]["status"] in {"draft", "active", "unknown"}
+    assert entries["RE-STORY-BBBBBB"]["status"] in {"draft", "active", "unknown"}
+    assert second.stem == "RE-STORY-BBBBBB"
     listing = baseline_list(_workspace(repo))
     assert "baseline/base-1" in listing.tags
 
 
 def test_baseline_create_refuses_uncommitted_managed_files(repo: Path) -> None:
     _write_template(repo, "user-story", 1)
-    _write_doc(repo, "RE-AAAAAA")
+    _write_doc(repo, "RE-STORY-AAAAAA")
     _commit_all(repo, "add doc")
-    body = repo / "documents" / "user-story" / "RE-AAAAAA.md"
+    body = repo / "documents" / "user-story" / "RE-STORY-AAAAAA.md"
     write_body(body, "# Sample\n\n## Summary\nEdited but uncommitted.\n")
     with pytest.raises(OperationRefused) as excinfo:
         baseline_create(_workspace(repo), "base-1")
@@ -561,7 +569,7 @@ def test_baseline_create_refuses_validation_errors(repo: Path) -> None:
     _write_template(repo, "user-story", 1)
     _write_doc(
         repo,
-        "RE-AAAAAA",
+        "RE-STORY-AAAAAA",
         body="# Sample\n\n## Summary\n*Write a summary.*\n",
     )
     _commit_all(repo, "add doc with empty required section")
@@ -572,7 +580,7 @@ def test_baseline_create_refuses_validation_errors(repo: Path) -> None:
 
 def test_baseline_create_refuses_duplicate_tag(repo: Path) -> None:
     _write_template(repo, "user-story", 1)
-    _write_doc(repo, "RE-AAAAAA")
+    _write_doc(repo, "RE-STORY-AAAAAA")
     _commit_all(repo, "add doc")
     baseline_create(_workspace(repo), "base-1")
     with pytest.raises(OperationRefused) as excinfo:
@@ -584,7 +592,7 @@ def test_baseline_create_requires_git(tmp_repo: Path) -> None:
     if (tmp_repo / ".git").exists():
         pytest.skip("needs a repository without git")
     _write_template(tmp_repo, "user-story", 1)
-    _write_doc(tmp_repo, "RE-AAAAAA")
+    _write_doc(tmp_repo, "RE-STORY-AAAAAA")
     with pytest.raises(OperationRefused) as excinfo:
         baseline_create(_workspace(tmp_repo, git=False), "base-1")
     assert excinfo.value.finding.code == "E-GIT-UNAVAILABLE"
@@ -606,9 +614,11 @@ def test_baseline_list_empty_without_tags(repo: Path) -> None:
 
 def test_repairs_conflicted_sidecar(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
-    sidecar_rel = _write_doc(tmp_repo, "RE-AAAAAA", links=(("refines", "RE-BBBBBB"),))
-    _write_doc(tmp_repo, "RE-BBBBBB")
-    raw = (tmp_repo / "documents" / "user-story" / "RE-AAAAAA.json").read_text(
+    sidecar_rel = _write_doc(
+        tmp_repo, "RE-STORY-AAAAAA", links=(("refines", "RE-STORY-BBBBBB"),)
+    )
+    _write_doc(tmp_repo, "RE-STORY-BBBBBB")
+    raw = (tmp_repo / "documents" / "user-story" / "RE-STORY-AAAAAA.json").read_text(
         encoding="utf-8"
     )
     conflicted = raw.replace(
@@ -617,7 +627,7 @@ def test_repairs_conflicted_sidecar(tmp_repo: Path) -> None:
         1,
     )
     assert conflicted != raw
-    (tmp_repo / "documents" / "user-story" / "RE-AAAAAA.json").write_text(
+    (tmp_repo / "documents" / "user-story" / "RE-STORY-AAAAAA.json").write_text(
         conflicted, encoding="utf-8"
     )
     result = repair_versions(_workspace(tmp_repo, git=False))
@@ -634,7 +644,7 @@ def test_repairs_conflicted_sidecar(tmp_repo: Path) -> None:
 
 def test_repair_versions_reports_clean_repo(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
-    _write_doc(tmp_repo, "RE-AAAAAA")
+    _write_doc(tmp_repo, "RE-STORY-AAAAAA")
     result = repair_versions(_workspace(tmp_repo, git=False))
     assert result.repaired == ()
     assert result.notices
@@ -647,21 +657,21 @@ def test_repair_versions_reports_clean_repo(tmp_repo: Path) -> None:
 
 def _duplicate_fixture(root: Path) -> None:
     """Synthesised ``E-ID-DUPLICATE`` pair plus an inbound link and a mention."""
-    _write_doc(root, "RE-7F3K2Q", folder="keep", title="Kept")
+    _write_doc(root, "RE-STORY-7F3K2Q", folder="keep", title="Kept")
     _write_doc(
         root,
-        "RE-7F3K2Q",
+        "RE-STORY-7F3K2Q",
         folder="move",
         title="Moved",
         doc_uuid=UUID(int=0x2222 << 98),
     )
     _write_doc(
         root,
-        "RE-2K7QMB",
+        "RE-STORY-2K7QMB",
         folder="other",
         title="Linking",
-        body="# Linking\n\nSee [[RE-7F3K2Q]] for details.\n",
-        links=(("refines", "RE-7F3K2Q"),),
+        body="# Linking\n\nSee [[RE-STORY-7F3K2Q]] for details.\n",
+        links=(("refines", "RE-STORY-7F3K2Q"),),
     )
 
 
@@ -672,25 +682,25 @@ def test_regenerate_id_resolves_duplicate_and_rewrites_links(repo: Path) -> None
     before = _workspace(repo).index.findings
     assert any(finding.code == "E-ID-DUPLICATE" for finding in before)
     ws = _workspace(repo)
-    result = repair_regenerate_id(ws, Path("documents/move/RE-7F3K2Q.json"))
-    assert result.old_id == "RE-7F3K2Q"
-    assert result.new_id != "RE-7F3K2Q"
-    assert is_derivable_from(result.new_id, result.uuid, "RE")
+    result = repair_regenerate_id(ws, Path("documents/move/RE-STORY-7F3K2Q.json"))
+    assert result.old_id == "RE-STORY-7F3K2Q"
+    assert result.new_id != "RE-STORY-7F3K2Q"
+    assert is_derivable_from(result.new_id, result.uuid, "RE", "STORY")
     new_sidecar = repo / "documents" / "move" / f"{result.new_id}.json"
     assert new_sidecar.is_file()
-    assert not (repo / "documents" / "move" / "RE-7F3K2Q.json").exists()
+    assert not (repo / "documents" / "move" / "RE-STORY-7F3K2Q.json").exists()
     moved = read_sidecar(new_sidecar, Document)
     assert moved.id == result.new_id
     assert moved.uuid == result.uuid
     assert (repo / "documents" / "move" / f"{result.new_id}.md").is_file()
-    kept = _read_doc(repo, Path("documents/keep/RE-7F3K2Q.json"))
-    assert kept.id == "RE-7F3K2Q"
-    linking = _read_doc(repo, Path("documents/other/RE-2K7QMB.json"))
+    kept = _read_doc(repo, Path("documents/keep/RE-STORY-7F3K2Q.json"))
+    assert kept.id == "RE-STORY-7F3K2Q"
+    linking = _read_doc(repo, Path("documents/other/RE-STORY-2K7QMB.json"))
     assert [link.target for link in linking.links] == [result.new_id]
     assert result.rewritten
-    assert result.rewritten[0].old_target == "RE-7F3K2Q"
-    assert any("RE-7F3K2Q" in entry for entry in result.manual)
-    assert any("RE-7F3K2Q" in notice for notice in result.notices)
+    assert result.rewritten[0].old_target == "RE-STORY-7F3K2Q"
+    assert any("RE-STORY-7F3K2Q" in entry for entry in result.manual)
+    assert any("RE-STORY-7F3K2Q" in notice for notice in result.notices)
     findings = _workspace(repo).index.findings
     assert not any(finding.code == "E-ID-DUPLICATE" for finding in findings)
 
@@ -700,16 +710,18 @@ def test_regenerate_id_lists_untracked_links_for_manual(repo: Path) -> None:
     _commit_all(repo, "duplicate pair")
     _write_doc(
         repo,
-        "RE-3M4N5P",
+        "RE-STORY-3M4N5P",
         folder="other",
         title="Fresh",
-        links=(("refines", "RE-7F3K2Q"),),
+        links=(("refines", "RE-STORY-7F3K2Q"),),
     )
-    result = repair_regenerate_id(_workspace(repo), Path("documents/move/RE-7F3K2Q.md"))
-    fresh = _read_doc(repo, Path("documents/other/RE-3M4N5P.json"))
-    assert [link.target for link in fresh.links] == ["RE-7F3K2Q"]
-    assert any("RE-3M4N5P" in entry for entry in result.manual)
-    assert all(rewritten.source != "RE-3M4N5P" for rewritten in result.rewritten)
+    result = repair_regenerate_id(
+        _workspace(repo), Path("documents/move/RE-STORY-7F3K2Q.md")
+    )
+    fresh = _read_doc(repo, Path("documents/other/RE-STORY-3M4N5P.json"))
+    assert [link.target for link in fresh.links] == ["RE-STORY-7F3K2Q"]
+    assert any("RE-STORY-3M4N5P" in entry for entry in result.manual)
+    assert all(rewritten.source != "RE-STORY-3M4N5P" for rewritten in result.rewritten)
 
 
 def test_regenerate_id_rewrites_all_without_git(tmp_repo: Path) -> None:
@@ -717,15 +729,17 @@ def test_regenerate_id_rewrites_all_without_git(tmp_repo: Path) -> None:
         pytest.skip("needs a repository without git")
     _duplicate_fixture(tmp_repo)
     result = repair_regenerate_id(
-        _workspace(tmp_repo, git=False), Path("documents/move/RE-7F3K2Q.json")
+        _workspace(tmp_repo, git=False), Path("documents/move/RE-STORY-7F3K2Q.json")
     )
-    linking = _read_doc(tmp_repo, Path("documents/other/RE-2K7QMB.json"))
+    linking = _read_doc(tmp_repo, Path("documents/other/RE-STORY-2K7QMB.json"))
     assert [link.target for link in linking.links] == [result.new_id]
 
 
 def test_regenerate_id_unknown_path_refused(repo: Path) -> None:
     with pytest.raises(OperationRefused) as excinfo:
-        repair_regenerate_id(_workspace(repo), Path("documents/move/RE-NOSUCH.json"))
+        repair_regenerate_id(
+            _workspace(repo), Path("documents/move/RE-STORY-ZZZZZZ.json")
+        )
     assert excinfo.value.finding.code == "E-ID-UNKNOWN"
 
 
@@ -736,7 +750,7 @@ def test_regenerate_id_unknown_path_refused(repo: Path) -> None:
 
 def test_repair_cache_rebuilds_corrupt_cache(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
-    _write_doc(tmp_repo, "RE-AAAAAA")
+    _write_doc(tmp_repo, "RE-STORY-AAAAAA")
     cache_path = tmp_repo / ".gregraph" / "cache" / "index.json"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text("not json at all", encoding="utf-8")
@@ -744,7 +758,7 @@ def test_repair_cache_rebuilds_corrupt_cache(tmp_repo: Path) -> None:
     assert result.file_count == 1
     cache = read_sidecar(cache_path, CacheIndex)
     assert cache.tool_version
-    key = "documents/user-story/RE-AAAAAA.md"
+    key = "documents/user-story/RE-STORY-AAAAAA.md"
     assert key in cache.files
     assert cache.files[key].body_hash == body_hash(_read_body(tmp_repo, Path(key)))
     assert cache.types_seen["user-story"] == "requirement"
@@ -753,7 +767,7 @@ def test_repair_cache_rebuilds_corrupt_cache(tmp_repo: Path) -> None:
 
 def test_repair_cache_drops_stale_entries(tmp_repo: Path) -> None:
     _write_template(tmp_repo, "user-story", 1)
-    _write_doc(tmp_repo, "RE-AAAAAA")
+    _write_doc(tmp_repo, "RE-STORY-AAAAAA")
     cache_path = tmp_repo / ".gregraph" / "cache" / "index.json"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(

@@ -177,7 +177,9 @@ def test_supersede_with_cr_records_origin_and_suggests_scope(
 
 
 def test_supersede_unknown_id_refused(repo: Path, capsys) -> None:
-    assert main(["--repo", str(repo), "supersede", "RE-NOSUCH", "--no-input"]) == 4
+    assert (
+        main(["--repo", str(repo), "supersede", "RE-STORY-ZZZZZZ", "--no-input"]) == 4
+    )
     assert "E-ID-UNKNOWN" in capsys.readouterr().err
 
 

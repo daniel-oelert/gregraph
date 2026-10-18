@@ -23,7 +23,7 @@ import pytest
 from gregraph.core.config import Config, CrSection, write_config
 from gregraph.core.git import GitAdapter
 from gregraph.core.hashing import body_hash
-from gregraph.core.ids import decode_body, derive_id
+from gregraph.core.ids import CR_ABBREVIATION, decode_body, derive_id
 from gregraph.core.models import (
     ChangeRequest,
     CrStatus,
@@ -67,10 +67,10 @@ from gregraph.core.workspace import Workspace
 
 UTC = dt.UTC
 CREATED = dt.datetime(2026, 9, 10, 14, 2, 11, tzinfo=UTC)
-DOC = "RE-AAAAAA"
-DOC2 = "RE-BBBBBB"
-CR = "RE-CCCCCC"
-CR2 = "RE-DDDDDD"
+DOC = "RE-STORY-AAAAAA"
+DOC2 = "RE-STORY-BBBBBB"
+CR = "RE-CHG-CCCCCC"
+CR2 = "RE-CHG-DDDDDD"
 
 
 # --------------------------------------------------------------------------
@@ -83,8 +83,12 @@ def uuid_for(body: str) -> UUID:
     return UUID(int=decode_body(body) << 98)
 
 
-def id_for(body: str) -> str:
-    return derive_id(uuid_for(body), "RE")
+def id_for(body: str, type_name: str = "user-story") -> str:
+    return derive_id(uuid_for(body), "RE", Config().types[type_name].abbreviation)
+
+
+def cr_id_for(body: str) -> str:
+    return derive_id(uuid_for(body), "RE", CR_ABBREVIATION)
 
 
 def add_template(
@@ -136,7 +140,7 @@ def make_doc(
     text: str | None = None,
 ) -> str:
     """Write a structurally valid document pair; returns its ID."""
-    doc_id = id_for(body)
+    doc_id = id_for(body, type)
     content = text if text is not None else f"# {title}\n\nText.\n"
     folder = Config().types[type].folder
     document = Document(
@@ -180,7 +184,7 @@ def make_cr(
     extra: Mapping[str, str] | None = None,
 ) -> str:
     """Write a change-request pair with consistent content hashes; returns its ID."""
-    cr_id = id_for(body)
+    cr_id = cr_id_for(body)
     content = text if text is not None else f"# {title}\n\nBody.\n"
     entries = sorted(scope, key=lambda entry: entry.id)
     cr = ChangeRequest(
@@ -458,11 +462,12 @@ def test_scope_add_refuses_duplicate_and_non_documents(tmp_repo: Path) -> None:
     cr_scope_add(ws, cr_id=cr_id, target=DOC)
     refused(lambda: cr_scope_add(ws, cr_id=cr_id, target=DOC), "E-CR-SCOPE-TARGET")
     refused(
-        lambda: cr_scope_add(ws, cr_id=cr_id, target=id_for("DDDDDD")),
+        lambda: cr_scope_add(ws, cr_id=cr_id, target=cr_id_for("DDDDDD")),
         "E-CR-SCOPE-TARGET",
     )
     refused(
-        lambda: cr_scope_add(ws, cr_id=cr_id, target="RE-NOSUCH"), "E-CR-SCOPE-TARGET"
+        lambda: cr_scope_add(ws, cr_id=cr_id, target="RE-STORY-ZZZZZZ"),
+        "E-CR-SCOPE-TARGET",
     )
 
 
@@ -514,7 +519,7 @@ def test_reanalyze_selected_target_and_unknown_refused(tmp_repo: Path) -> None:
     result = cr_reanalyze(ws, cr_id=cr_id, targets=[DOC])
     assert {entry.id: entry.base_version for entry in result.scope} == {DOC: 2, DOC2: 1}
     refused(
-        lambda: cr_reanalyze(ws, cr_id=cr_id, targets=["RE-NOSUCH"]),
+        lambda: cr_reanalyze(ws, cr_id=cr_id, targets=["RE-STORY-ZZZZZZ"]),
         "E-CR-SCOPE-TARGET",
     )
 
@@ -1029,7 +1034,7 @@ def test_e_cr_scope_target_validation(tmp_repo: Path) -> None:
             ScopeEntry(id=DOC, intent="modify", base_version=1),
             ScopeEntry(id=DOC, intent="modify", base_version=1),
             ScopeEntry(id=CR2, intent="modify", base_version=1),
-            ScopeEntry(id="RE-NOSUCH", intent="modify", base_version=1),
+            ScopeEntry(id="RE-STORY-ZZZZZZ", intent="modify", base_version=1),
         ],
     )
     findings = of_code(
@@ -1041,7 +1046,7 @@ def test_e_cr_scope_target_validation(tmp_repo: Path) -> None:
 
 def test_e_cr_origin_missing(tmp_repo: Path) -> None:
     setup_repo(tmp_repo)
-    make_doc(tmp_repo, "AAAAAA", origin_cr="RE-NOSUCH")
+    make_doc(tmp_repo, "AAAAAA", origin_cr="RE-CHG-ZZZZZZ")
     findings = of_code(
         validate_workspace(ws_of(tmp_repo, git=False)), "E-CR-ORIGIN-MISSING"
     )
@@ -1171,7 +1176,7 @@ def test_w_cr_mention_unscoped(tmp_repo: Path) -> None:
 
 def test_e_mention_unknown_in_cr_body(tmp_repo: Path) -> None:
     setup_repo(tmp_repo)
-    cr_id = make_cr(tmp_repo, text="# Raise the limit\n\nSee [[RE-ZZZZZZ]].\n")
+    cr_id = make_cr(tmp_repo, text="# Raise the limit\n\nSee [[RE-STORY-ZZZZZZ]].\n")
     findings = of_code(
         validate_workspace(ws_of(tmp_repo, git=False)), "E-MENTION-UNKNOWN"
     )
@@ -1182,10 +1187,10 @@ def test_cr_body_bare_ids_are_not_mentions(tmp_repo: Path) -> None:
     # D-AGENT-6 (§5.2): bare ID-shaped prose in a CR body is not a mention
     setup_repo(tmp_repo)
     make_doc(tmp_repo, "AAAAAA")
-    make_cr(tmp_repo, text="# Raise the limit\n\nTouches RE-BBBBBB.\n")
+    make_cr(tmp_repo, text="# Raise the limit\n\nTouches RE-STORY-BBBBBB.\n")
     make_cr(
         tmp_repo,
-        text="# Raise the limit\n\nSee RE-ZZZZZZ and multi-target here.\n",
+        text="# Raise the limit\n\nSee RE-STORY-ZZZZZZ and multi-target here.\n",
     )
     findings = validate_workspace(ws_of(tmp_repo, git=False))
     assert not of_code(findings, "W-CR-MENTION-UNSCOPED")

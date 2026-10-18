@@ -386,12 +386,12 @@ def test_static_bundle_requires_index_html() -> None:
 
 
 def test_entry_point_violation_detects_missing_serve_group(tmp_path: Path) -> None:
-    wheel = tmp_path / "gregraph_webui-0.1.1-py3-none-any.whl"
+    wheel = tmp_path / "gregraph_webui-0.2.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr(
-            "gregraph_webui-0.1.1.dist-info/entry_points.txt", "[console_scripts]\n"
+            "gregraph_webui-0.2.0.dist-info/entry_points.txt", "[console_scripts]\n"
         )
-    assert pc._entry_point_violations(wheel, "0.1.1")
+    assert pc._entry_point_violations(wheel, "0.2.0")
 
 
 # --------------------------------------------------------------------------

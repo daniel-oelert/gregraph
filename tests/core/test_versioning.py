@@ -39,7 +39,7 @@ NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 def _doc(
     *,
-    id: str = "RE-000001",
+    id: str = "RE-FEAT-000001",
     version: int = 1,
     body_hash: str = "sha256:aaa",
     links: list[Link] | None = None,
@@ -65,7 +65,7 @@ def _doc(
 
 def _cr(
     *,
-    id: str = "CR-000001",
+    id: str = "RE-CHG-000001",
     version: int = 1,
     body_hash: str = "sha256:bbb",
     scope: list[ScopeEntry] | None = None,
@@ -99,14 +99,14 @@ def _cr(
 
 
 def test_scope_hash_sorted_by_id() -> None:
-    a = ScopeEntry(id="RE-000001", intent="modify", base_version=1)
-    b = ScopeEntry(id="RE-000002", intent="supersede", base_version=1)
+    a = ScopeEntry(id="RE-FEAT-000001", intent="modify", base_version=1)
+    b = ScopeEntry(id="RE-FEAT-000002", intent="supersede", base_version=1)
     assert scope_hash([a, b]) == scope_hash([b, a])
 
 
 def test_scope_hash_changes_with_content() -> None:
-    a = ScopeEntry(id="RE-000001", intent="modify", base_version=1)
-    b = ScopeEntry(id="RE-000001", intent="supersede", base_version=1)
+    a = ScopeEntry(id="RE-FEAT-000001", intent="modify", base_version=1)
+    b = ScopeEntry(id="RE-FEAT-000001", intent="supersede", base_version=1)
     assert scope_hash([a]) == scope_hash([a])
     # Only the id is hashed, so intent changes do not change the scope hash.
     assert scope_hash([a]) == scope_hash([b])
@@ -281,7 +281,7 @@ def test_reconcile_bump_once() -> None:
     doc = _doc(body_hash="sha256:old")
     body = "# Title\n\n## Story\ncontent\n"
     report = reconcile([(doc, body)], mode="bump")
-    assert report.bumped == ["RE-000001"]
+    assert report.bumped == ["RE-FEAT-000001"]
     assert doc.version == 2
     # Second run with the same content must not bump again.
     report2 = reconcile([(doc, body)], mode="bump")
@@ -306,10 +306,10 @@ def test_reconcile_title_sync() -> None:
 
 def test_reconcile_scope_hash_change_bumps_cr() -> None:
     cr = _cr(scope_hash="sha256:old", version=1)
-    cr.scope = [ScopeEntry(id="RE-000001", intent="modify", base_version=1)]
+    cr.scope = [ScopeEntry(id="RE-FEAT-000001", intent="modify", base_version=1)]
     body = "# CR\n\n## Summary\nchange\n"
     report = reconcile([(cr, body)], mode="bump")
-    assert report.bumped == ["CR-000001"]
+    assert report.bumped == ["RE-CHG-000001"]
     assert cr.version == 2
     assert cr.scope_hash == scope_hash(cr.scope)
 
@@ -318,14 +318,14 @@ def test_reconcile_grace_initialises_at_v1() -> None:
     """§3.3 rules 1–2 / AGENT-011: a modified uncommitted v1 is populated."""
     doc = _doc(title="Old", body_hash="sha256:old", version=1)
     body = "# New Title\n\n## Story\ncontent\n"
-    report = reconcile([(doc, body)], mode="bump", in_grace={"RE-000001": True})
-    assert report.initialised == ["RE-000001"]
+    report = reconcile([(doc, body)], mode="bump", in_grace={"RE-FEAT-000001": True})
+    assert report.initialised == ["RE-FEAT-000001"]
     assert report.bumped == []
     assert doc.version == 1
     assert doc.title == "New Title"
     assert doc.body_hash == body_hash(body)
     # A second pass over the same content is a no-op.
-    report2 = reconcile([(doc, body)], mode="bump", in_grace={"RE-000001": True})
+    report2 = reconcile([(doc, body)], mode="bump", in_grace={"RE-FEAT-000001": True})
     assert report2.initialised == []
     assert report2.bumped == []
     assert doc.version == 1
@@ -336,23 +336,23 @@ def test_reconcile_grace_via_model_flag() -> None:
     object.__setattr__(doc, "_in_grace", True)
     body = "# Title\n\n## Story\ncontent\n"
     report = reconcile([(doc, body)], mode="bump")
-    assert report.initialised == ["RE-000001"]
+    assert report.initialised == ["RE-FEAT-000001"]
     assert report.bumped == []
     assert doc.version == 1
 
 
 def test_reconcile_grace_report_mode_keeps_target_fresh() -> None:
     """§3.3 rule 4: report mode must not mark a grace target unbumped."""
-    doc = _doc(id="RE-000001", body_hash="sha256:old", version=1)
+    doc = _doc(id="RE-FEAT-000001", body_hash="sha256:old", version=1)
     object.__setattr__(doc, "_in_grace", True)
-    target_view = _doc(id="RE-000001", version=1)  # plain view, no grace flag
+    target_view = _doc(id="RE-FEAT-000001", version=1)  # plain view, no grace flag
     body = "# Title\n\n## Story\ncontent\n"
     report = reconcile(
         [(doc, body)],
         mode="report",
-        links=[("RE-S", _link("RE-000001", 1), target_view)],
+        links=[("RE-S", _link("RE-FEAT-000001", 1), target_view)],
     )
-    assert report.initialised == ["RE-000001"]
+    assert report.initialised == ["RE-FEAT-000001"]
     assert report.pending == []
     assert doc.version == 1
 
@@ -361,8 +361,8 @@ def test_reconcile_grace_applies_only_at_v1() -> None:
     """§3.3 rule 5 / AGENT-013: past the grace window a change bumps normally."""
     doc = _doc(version=2, body_hash="sha256:old")
     body = "# Title\n\n## Story\ncontent\n"
-    report = reconcile([(doc, body)], mode="bump", in_grace={"RE-000001": True})
-    assert report.bumped == ["RE-000001"]
+    report = reconcile([(doc, body)], mode="bump", in_grace={"RE-FEAT-000001": True})
+    assert report.bumped == ["RE-FEAT-000001"]
     assert report.initialised == []
     assert doc.version == 3
 
@@ -372,7 +372,7 @@ def test_reconcile_degraded_mode_has_no_grace() -> None:
     doc = _doc(body_hash="sha256:old", version=1)
     body = "# Title\n\n## Story\ncontent\n"
     report = reconcile([(doc, body)], mode="bump")
-    assert report.bumped == ["RE-000001"]
+    assert report.bumped == ["RE-FEAT-000001"]
     assert report.initialised == []
     assert doc.version == 2
 
@@ -385,12 +385,12 @@ def test_reconcile_degraded_mode_has_no_grace() -> None:
 CONFLICTED = json.dumps(
     {
         "schema": 1,
-        "id": "RE-000001",
+        "id": "RE-FEAT-000001",
         "version": 3,
         "body_hash": "sha256:old",
         "links": [
-            {"type": "refines", "target": "RE-000002", "target_version": 9},
-            {"type": "refines", "target": "RE-000002", "target_version": 1},
+            {"type": "refines", "target": "RE-FEAT-000002", "target_version": 9},
+            {"type": "refines", "target": "RE-FEAT-000002", "target_version": 1},
         ],
     },
     indent=2,

@@ -171,7 +171,7 @@ def test_render_replaces_title(tmp_path: Path) -> None:
     out = render_template(
         loaded["goal"][0],
         title="My Goal",
-        id="RE-000001",
+        id="RE-GOAL-000001",
         type="goal",
         kind="goal",
         created="2026-01-01T00:00:00Z",

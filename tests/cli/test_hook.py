@@ -106,7 +106,7 @@ def write_doc(
     spec = config.types[type_name]
     body = filled_body(root, spec.template, title)
     generated = uuid4()
-    doc_id = derive_id(generated)
+    doc_id = derive_id(generated, config.ids.prefix, spec.abbreviation)
     document = Document(
         schema=1,
         uuid=generated,
@@ -267,9 +267,9 @@ def test_asset_change_bumps_document(hook_repo: Path) -> None:
     root = hook_repo
     asset_bytes = b"png-bytes-v1"
     generated_uuid = uuid4()
-    doc_id = derive_id(generated_uuid)
     config = Config()
     spec = config.types["feature"]
+    doc_id = derive_id(generated_uuid, config.ids.prefix, spec.abbreviation)
     body = filled_body(root, spec.template, "Upload documents")
     body += f"\n![flow](../../assets/{doc_id}/pic.png)\n"
     document = Document(

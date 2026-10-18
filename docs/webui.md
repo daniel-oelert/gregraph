@@ -36,7 +36,7 @@ versions at commit time.
 ## Install
 
 The web UI needs the two baseline distributions and `gregraph-webui`, all at
-version 0.1.1.
+version 0.2.0.
 
 From a checkout:
 

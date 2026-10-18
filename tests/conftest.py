@@ -170,8 +170,14 @@ def sample_graph(tmp_repo: Path) -> SampleGraph:
     write_config(config_path(tmp_repo), Config())
     config = Config()
     ids = {
-        role: derive_id(_sample_uuid(index))
-        for index, role in enumerate(_SAMPLE_SPECS, start=1)
+        role: derive_id(
+            _sample_uuid(index),
+            config.ids.prefix,
+            config.types[type_name].abbreviation,
+        )
+        for index, (role, (type_name, _title, _links)) in enumerate(
+            _SAMPLE_SPECS.items(), start=1
+        )
     }
 
     for index, (role, (type_name, title, link_specs)) in enumerate(

@@ -1,6 +1,6 @@
 # GREGraph CLI reference
 
-Every command, flag, exit code and interactive behaviour of GREGraph v0.1.1,
+Every command, flag, exit code and interactive behaviour of GREGraph v0.2.0,
 plus the `serve` command of the optional `gregraph-webui` distribution.
 The normative specification is `docs/design.md` §13; this document describes
 the implemented surface. When the two disagree, the spec wins and this file
@@ -50,6 +50,23 @@ the command. `gregraph` without a command prints help and exits 2;
 `check` exits 1 when the pre-commit hook would block. `hook pre-commit`
 exits non-zero to abort the commit. `status` always exits 0.
 
+### Identifiers and config schema
+
+IDs are typed: `<PREFIX>-<ABBREVIATION>-<6-char Crockford body>`, for example
+`RE-FEAT-7F3K2Q`. `PREFIX` is the repository's `ids.prefix`; `ABBREVIATION`
+is the document type's configured abbreviation (`[A-Z]{3,5}`, unique across
+types). Change requests always use the reserved abbreviation `CHG`, for
+example `RE-CHG-3M9XA1`. The six-character body stays random.
+
+The configuration schema is `2` (`config_schema = 2`). Every configured
+type requires an `abbreviation`. A schema-1 configuration is refused by every
+command except `init` with exit 3 and a message pointing at
+`scripts/migrate_type_ids.py`; the tool never reads or partially supports a
+schema-1 repository. Old two-segment IDs (`RE-7F3K2Q`) are rejected
+everywhere — there are no legacy aliases. After migration, a remaining old
+ID is reported as `E-ID-LEGACY`. See
+[`docs/migration-typed-ids.md`](migration-typed-ids.md).
+
 Under `--json` the exit codes map to documents, not stderr text: exit 1
 prints the command's *result* document (findings array, check payload —
 not an error), and exits 2/3/4/5 print one **error envelope**
@@ -59,7 +76,7 @@ empty stderr (see [Output conventions](#output-conventions)).
 ### Output conventions
 
 - Findings are one per line on stdout (refusals on stderr), prefixed with the
-  code and subject: `E-CYCLE RE-1 refines RE-2: … (fix: …)`. Warnings use
+  code and subject: `E-CYCLE RE-STORY-7F3K2Q refines RE-FEAT-3M9XA1: … (fix: …)`. Warnings use
   `W-…`, errors `E-…`.
 - Colours are used only when stdout is a TTY and `NO_COLOR` is unset.
 - `note: not a git repository — <feature> unavailable` lines mark degraded
@@ -146,7 +163,9 @@ gregraph init [PATH] [--prefix RE] [--baseline-branch BRANCH]
 
 Creates a requirements repository: the directory layout, built-in templates
 under `.gregraph/templates/<name>/v1/`, `config.toml` with the default
-document types, `.gitignore`, and a starter `README.md`. It also writes the
+document types, `.gitignore`, and a starter `README.md`. The generated
+config uses `config_schema = 2` and writes an `abbreviation` for every
+shipped type (appendix B.1 of the spec). It also writes the
 agent instruction files: `AGENTS.md` — existing content is preserved and the
 managed gregraph block is appended, or replaced in place when a block already
 exists — and `.agents/skills/gregraph/SKILL.md`, wholly tool-owned and
@@ -475,10 +494,12 @@ gregraph schema [--type TYPE] [--json]
 ```
 
 Prints the repository rulebook in one call — what the repository allows,
-without reading `config.toml` or template files: the config policies (ID
-prefix, baseline branch, `versioning`, `graph`, `assets` and `cr` settings),
-the configured types (kind, folder, template, ID prefix, description), the
-five kinds, the nine edge rules (direction, hierarchical, acyclic, source/
+without reading `config.toml` or template files: the payload's `schema`
+(config schema), the ID prefix, baseline branch, `versioning`, `graph`,
+`assets` and `cr` settings, the configured types (kind, abbreviation,
+folder, template, ID prefix, description), the fixed CR abbreviation
+`cr_abbreviation` (`CHG`), the five kinds, the nine edge rules (direction,
+hierarchical, acyclic, source/
 target kind sets, `same_kind_only`, mutual exclusions, and the §6.1
 guidance as each rule's description), the active templates with their
 required sections and placeholders, and the CR lifecycle (statuses,
@@ -487,7 +508,7 @@ transitions, scope intents).
 | Flag | Meaning |
 |---|---|
 | `--type TYPE` | Filter `types` to one type and `templates` to those its entries reference (plus the CR template when CRs are enabled). The global sections (`kinds`, `edge_rules`, `cr_lifecycle`, policies) stay. Unknown type refuses `E-TYPE-UNKNOWN`. |
-| `--json` | One object mirroring the human output: `schema`, `tool_version`, `id_prefix`, `baseline_branch`, `versioning`, `graph`, `assets`, `cr`, `types`, `kinds`, `edge_rules`, `templates` (with `sections`), `cr_lifecycle`. |
+| `--json` | One object mirroring the human output: `schema` (config schema, currently `2`), `tool_version`, `id_prefix`, `cr_abbreviation` (`CHG`), `baseline_branch`, `versioning`, `graph`, `assets`, `cr`, `types` (each with `abbreviation`), `kinds`, `edge_rules`, `templates` (with `sections`), `cr_lifecycle`. |
 
 Useful before any authoring or linking call: `schema --json` is the
 authoritative answer to "which edge types may this document use and which
@@ -588,6 +609,12 @@ superseding migration creates a new document, copies matching sections, puts
 unmatched content under `## Unmapped content (migration)`, supersedes the
 old one and copies its links. Either way, the change is a content change and
 inbound links become outdated — the correct "re-check" signal.
+
+`gregraph migrate` migrates *templates*, not identifiers. The one-time
+schema-1 → schema-2 identifier rewrite is the standalone
+`scripts/migrate_type_ids.py` (dry-run by default, `--apply` to write); it
+preserves versions and is not reachable through any `gregraph` command. See
+[`docs/migration-typed-ids.md`](migration-typed-ids.md).
 
 ### `template`
 

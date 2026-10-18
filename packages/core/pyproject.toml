@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gregraph-core"
-version = "0.1.1"
+version = "0.2.0"
 description = "Local, Git-aware requirements management core library"
 requires-python = ">=3.12"
 dependencies = [

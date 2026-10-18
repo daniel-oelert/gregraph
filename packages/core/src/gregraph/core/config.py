@@ -13,11 +13,18 @@ import re
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from gregraph import __version__
+from gregraph.core.ids import CR_ABBREVIATION, is_valid_abbreviation
 
 Kind = Literal["goal", "requirement", "design", "verification", "information"]
 Policy = Literal["block", "warn"]
@@ -27,12 +34,16 @@ _PREFIX_RE = re.compile(r"[A-Z][A-Z0-9]{0,7}")
 _BARE_KEY_RE = re.compile(r"[A-Za-z0-9_-]+")
 
 
+class ConfigSchemaError(ValueError):
+    """A config file predates typed IDs or uses an unsupported schema."""
+
+
 class GregraphSection(BaseModel):
     """``[gregraph]``: config schema version and writing tool version."""
 
     model_config = ConfigDict(extra="forbid")
 
-    config_schema: Literal[1] = 1
+    config_schema: Literal[2] = 2
     tool_version: str = __version__
 
 
@@ -91,9 +102,19 @@ class TypeDefinition(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    abbreviation: str
     kind: Kind
     template: str
     folder: str
+
+    @field_validator("abbreviation")
+    @classmethod
+    def _validate_abbreviation(cls, value: str) -> str:
+        if not is_valid_abbreviation(value):
+            raise ValueError(
+                f"type abbreviation must match [A-Z]{{3,5}}, got {value!r}"
+            )
+        return value
 
 
 class CrSection(BaseModel):
@@ -107,25 +128,27 @@ class CrSection(BaseModel):
 
 
 def default_types() -> dict[str, TypeDefinition]:
-    """Shipped types of appendix B.1, in appendix B.1 order."""
-    shipped: list[tuple[str, Kind, str]] = [
-        ("context", "goal", "context"),
-        ("goal", "goal", "goal"),
-        ("epic", "goal", "epic"),
-        ("feature", "requirement", "feature"),
-        ("user-story", "requirement", "user-story"),
-        ("functional-requirement", "requirement", "requirement-ears"),
-        ("non-functional-requirement", "requirement", "requirement-ears"),
-        ("constraint", "requirement", "constraint"),
-        ("design", "design", "design"),
-        ("decision", "design", "decision"),
-        ("test-case", "verification", "test-case"),
-        ("stakeholder", "information", "stakeholder"),
-        ("assumption", "information", "assumption"),
+    """Shipped types and abbreviations of appendix B.1, in B.1 order."""
+    shipped: list[tuple[str, str, Kind, str]] = [
+        ("context", "CTX", "goal", "context"),
+        ("goal", "GOAL", "goal", "goal"),
+        ("epic", "EPIC", "goal", "epic"),
+        ("feature", "FEAT", "requirement", "feature"),
+        ("user-story", "STORY", "requirement", "user-story"),
+        ("functional-requirement", "FUNC", "requirement", "requirement-ears"),
+        ("non-functional-requirement", "NFR", "requirement", "requirement-ears"),
+        ("constraint", "CON", "requirement", "constraint"),
+        ("design", "DSGN", "design", "design"),
+        ("decision", "DEC", "design", "decision"),
+        ("test-case", "TEST", "verification", "test-case"),
+        ("stakeholder", "STKH", "information", "stakeholder"),
+        ("assumption", "ASM", "information", "assumption"),
     ]
     return {
-        name: TypeDefinition(kind=kind, template=template, folder=name)
-        for name, kind, template in shipped
+        name: TypeDefinition(
+            abbreviation=abbreviation, kind=kind, template=template, folder=name
+        )
+        for name, abbreviation, kind, template in shipped
     }
 
 
@@ -161,11 +184,45 @@ class Config(BaseModel):
             checked[name] = spec
         return checked
 
+    @model_validator(mode="after")
+    def _validate_abbreviations(self) -> Self:
+        seen: dict[str, str] = {}
+        for name, spec in self.types.items():
+            abbreviation = spec.abbreviation
+            if abbreviation == CR_ABBREVIATION:
+                raise ValueError(
+                    f"type {name!r} may not use the reserved change-request "
+                    f"abbreviation {CR_ABBREVIATION!r}"
+                )
+            prior = seen.get(abbreviation)
+            if prior is not None:
+                raise ValueError(
+                    f"types {prior!r} and {name!r} both use abbreviation "
+                    f"{abbreviation!r}"
+                )
+            seen[abbreviation] = name
+        return self
+
 
 def read_config(path: Path) -> Config:
-    """Read and validate ``config.toml`` at ``path`` (spec §5.3, appendix B.1)."""
+    """Read and validate ``config.toml`` at ``path`` (spec §5.3, appendix B.1).
+
+    Schema 1 is refused with a migration hint (hard cutover); an absent
+    ``config_schema`` and an empty file mean the schema-2 defaults.
+    """
     with path.open("rb") as handle:
         data = tomllib.load(handle)
+    gregraph = data.get("gregraph")
+    schema = gregraph.get("config_schema") if isinstance(gregraph, Mapping) else None
+    if schema == 1:
+        raise ConfigSchemaError(
+            "config_schema 1 uses legacy two-segment IDs; "
+            "run scripts/migrate_type_ids.py to migrate this repository"
+        )
+    if schema is not None and schema != 2:
+        raise ConfigSchemaError(
+            f"unsupported config_schema {schema!r}; this release requires schema 2"
+        )
     return Config.model_validate(data)
 
 

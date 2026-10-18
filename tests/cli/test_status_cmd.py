@@ -244,7 +244,7 @@ def test_status_json_payload(sample_graph: SampleGraph) -> None:
     assert isinstance(payload["documents"], dict)
     links = payload["links"]
     assert isinstance(links, dict)
-    assert payload["conflicts"] == [["RE-000002", "RE-00000A"]]
+    assert payload["conflicts"] == [["RE-DSGN-00000A", "RE-GOAL-000002"]]
     hook = payload["hook"]
     assert set(hook) == {"installed", "up_to_date"}
     assert payload["degraded"] is ((sample_graph.root / ".git").exists() is False)

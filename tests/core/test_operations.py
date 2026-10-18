@@ -130,7 +130,7 @@ def add_template(
     )
 
 
-def add_cr(root: Path, cr_id: str = "CR-ABCDEF") -> str:
+def add_cr(root: Path, cr_id: str = "RE-CHG-ABCDEF") -> str:
     """Write an open change request under ``changes/`` (spec §9.2)."""
     cr = ChangeRequest(
         schema=1,
@@ -193,7 +193,7 @@ def test_create_document_writes_pair(tmp_repo: Path) -> None:
     assert body_path.read_text(encoding="utf-8").startswith("# Upload documents\n")
     document = read_sidecar(sidecar_path, Document)
     assert document.id == result.id
-    assert is_derivable_from(document.id, document.uuid, "RE")
+    assert is_derivable_from(document.id, document.uuid, "RE", "STORY")
     assert document.title == "Upload documents"
     assert document.version == 1
     assert document.template == TemplateRef(name="user-story", version=1)
@@ -259,7 +259,10 @@ def test_create_document_initial_links_checked(sample_graph: SampleGraph) -> Non
     assert excinfo.value.finding.code == "E-TARGET-SUPERSEDED"
     with pytest.raises(OperationRefused) as excinfo:
         create_document(
-            ws, type="user-story", title="Missing", links=[("refines", "RE-NOSUCH")]
+            ws,
+            type="user-story",
+            title="Missing",
+            links=[("refines", "RE-STORY-ZZZZZZ")],
         )
     assert excinfo.value.finding.code == "E-LINK-TARGET-MISSING"
 
@@ -347,7 +350,7 @@ def test_create_document_unknown_cr_refused(tmp_repo: Path) -> None:
     add_template(tmp_repo, "user-story")
     ws = Workspace.open(tmp_repo)
     with pytest.raises(OperationRefused) as excinfo:
-        create_document(ws, type="user-story", title="X", cr="CR-NOSUCH")
+        create_document(ws, type="user-story", title="X", cr="RE-CHG-ZZZZZZ")
     assert excinfo.value.finding.code == "E-ID-UNKNOWN"
 
 
@@ -454,7 +457,7 @@ def test_link_missing_target_refused(sample_graph: SampleGraph) -> None:
     ws = Workspace.open(sample_graph.root)
     orphan = sample_graph.ids["orphan"]
     with pytest.raises(OperationRefused) as excinfo:
-        link(ws, source=orphan, link_type="relates-to", target="RE-NOSUCH")
+        link(ws, source=orphan, link_type="relates-to", target="RE-STORY-ZZZZZZ")
     assert excinfo.value.finding.code == "E-LINK-TARGET-MISSING"
 
 
@@ -462,7 +465,7 @@ def test_link_unknown_source_refused(sample_graph: SampleGraph) -> None:
     ws = Workspace.open(sample_graph.root)
     orphan = sample_graph.ids["orphan"]
     with pytest.raises(OperationRefused) as excinfo:
-        link(ws, source="RE-NOSUCH", link_type="relates-to", target=orphan)
+        link(ws, source="RE-STORY-ZZZZZZ", link_type="relates-to", target=orphan)
     assert excinfo.value.finding.code == "E-ID-UNKNOWN"
 
 
@@ -505,9 +508,9 @@ def test_unlink_missing_noop(sample_graph: SampleGraph) -> None:
 def test_unlink_broken_edge(sample_graph: SampleGraph) -> None:
     root = sample_graph.root
     orphan = sample_graph.ids["orphan"]
-    write_link(root, orphan, "relates-to", "RE-NOSUCH")
+    write_link(root, orphan, "relates-to", "RE-STORY-ZZZZZZ")
     ws = Workspace.open(root)
-    result = unlink(ws, source=orphan, link_type="relates-to", target="RE-NOSUCH")
+    result = unlink(ws, source=orphan, link_type="relates-to", target="RE-STORY-ZZZZZZ")
     assert result.removed
 
 
@@ -647,7 +650,7 @@ def test_link_refresh_supersedes_quiet(tmp_repo: Path) -> None:
 def test_link_refresh_missing_target_refused(sample_graph: SampleGraph) -> None:
     root = sample_graph.root
     orphan = sample_graph.ids["orphan"]
-    write_link(root, orphan, "relates-to", "RE-NOSUCH")
+    write_link(root, orphan, "relates-to", "RE-STORY-ZZZZZZ")
     ws = Workspace.open(root)
     with pytest.raises(OperationRefused) as excinfo:
         link_refresh(ws, select_all=True)
@@ -854,7 +857,7 @@ def test_supersede_unknown_target_refused(tmp_repo: Path) -> None:
     add_template(tmp_repo, "user-story")
     ws = Workspace.open(tmp_repo)
     with pytest.raises(OperationRefused) as excinfo:
-        supersede(ws, targets=["RE-NOSUCH"], title="X")
+        supersede(ws, targets=["RE-STORY-ZZZZZZ"], title="X")
     assert excinfo.value.finding.code == "E-ID-UNKNOWN"
     with pytest.raises(ValueError):
         supersede(ws, targets=[], title="X")
@@ -951,10 +954,10 @@ def test_cr_operations_smoke(tmp_repo: Path) -> None:
 def test_unknown_id_refusals(sample_graph: SampleGraph) -> None:
     ws = Workspace.open(sample_graph.root)
     for call in (
-        lambda: set_fields(ws, doc_id="RE-NOSUCH", assignments=["tags=a"]),
-        lambda: deprecate(ws, doc_id="RE-NOSUCH", reason="r"),
-        lambda: undeprecate(ws, doc_id="RE-NOSUCH"),
-        lambda: link_refresh(ws, from_id="RE-NOSUCH"),
+        lambda: set_fields(ws, doc_id="RE-STORY-ZZZZZZ", assignments=["tags=a"]),
+        lambda: deprecate(ws, doc_id="RE-STORY-ZZZZZZ", reason="r"),
+        lambda: undeprecate(ws, doc_id="RE-STORY-ZZZZZZ"),
+        lambda: link_refresh(ws, from_id="RE-STORY-ZZZZZZ"),
     ):
         with pytest.raises(OperationRefused) as excinfo:
             call()
@@ -965,7 +968,7 @@ def test_operation_refused_carries_finding(sample_graph: SampleGraph) -> None:
     ws = Workspace.open(sample_graph.root)
     orphan = sample_graph.ids["orphan"]
     with pytest.raises(OperationRefused) as excinfo:
-        link(ws, source=orphan, link_type="relates-to", target="RE-NOSUCH")
+        link(ws, source=orphan, link_type="relates-to", target="RE-STORY-ZZZZZZ")
     finding = excinfo.value.finding
     assert finding.severity == "E"
     assert "E-LINK-TARGET-MISSING" in str(excinfo.value)
@@ -1612,9 +1615,10 @@ def test_describe_schema_rulebook(tmp_repo: Path) -> None:
     add_template(tmp_repo, "change-request")
     ws = Workspace.open(tmp_repo)
     info = describe_schema(ws)
-    assert info.schema_ == 1
+    assert info.schema_ == 2
     assert info.tool_version == __version__
     assert info.id_prefix == "RE"
+    assert info.cr_abbreviation == "CHG"
     assert info.baseline_branch == "main"
     assert info.versioning == {"on_outdated_links": "block", "on_cr_modified": "warn"}
     assert info.graph == {"open_conflicts": "warn"}
@@ -1640,7 +1644,7 @@ def test_describe_schema_rulebook(tmp_repo: Path) -> None:
     assert conflicts.direction == "symmetric" and not conflicts.acyclic
     assert info.types["user-story"].kind == "requirement"
     assert info.types["user-story"].template == "user-story"
-    assert info.types["user-story"].id_prefix == "RE"
+    assert info.types["user-story"].abbreviation == "STORY"
     assert info.types["user-story"].description == "user-story v1"
     template_info = info.templates["user-story"]
     assert template_info.latest_version == 1
@@ -1731,7 +1735,7 @@ def test_link_candidates_all_types_and_cycle(sample_graph: SampleGraph) -> None:
     with pytest.raises(ValueError):
         link_candidates(ws, source=orphan, edge_type="bogus")  # type: ignore[arg-type]
     with pytest.raises(OperationRefused) as excinfo:
-        link_candidates(ws, source="RE-NOSUCH")
+        link_candidates(ws, source="RE-STORY-ZZZZZZ")
     assert excinfo.value.finding.code == "E-ID-UNKNOWN"
 
 
@@ -1799,9 +1803,9 @@ def test_build_context_validation_errors(sample_graph: SampleGraph) -> None:
     with pytest.raises(ValueError):
         build_context(ws, ids=["RE-X"], direction="sideways")  # type: ignore[arg-type]
     with pytest.raises(OperationRefused) as excinfo:
-        build_context(ws, ids=["RE-NOSUCH"])
+        build_context(ws, ids=["RE-STORY-ZZZZZZ"])
     assert excinfo.value.finding.code == "E-ID-UNKNOWN"
-    assert excinfo.value.finding.subject == "RE-NOSUCH"
+    assert excinfo.value.finding.subject == "RE-STORY-ZZZZZZ"
 
 
 def test_build_context_terms(tmp_repo: Path) -> None:

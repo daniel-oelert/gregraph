@@ -72,7 +72,7 @@ def _document_payload(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema": 1,
         "uuid": "6f3c2f1e-8b3e-4a4c-9a3d-2d0f5b7a9c11",
-        "id": "RE-7F3K2Q",
+        "id": "RE-STORY-7F3K2Q",
         "type": "user-story",
         "title": "Upload documents to a knowledge base",
         "created": "2026-09-10T14:02:11Z",
@@ -82,8 +82,8 @@ def _document_payload(**overrides: Any) -> dict[str, Any]:
         "body_hash": "sha256:" + "9c1d" * 16,
         "assets": [{"path": "upload-flow.png", "hash": "sha256:" + "41ab" * 16}],
         "links": [
-            {"type": "depends-on", "target": "RE-9PZ0AH", "target_version": 1},
-            {"type": "refines", "target": "RE-2K7QMB", "target_version": 4},
+            {"type": "depends-on", "target": "RE-FEAT-9PZ0AH", "target_version": 1},
+            {"type": "refines", "target": "RE-FEAT-2K7QMB", "target_version": 4},
         ],
         "deprecated": None,
         "tags": [],
@@ -98,7 +98,7 @@ def _cr_payload(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema": 1,
         "uuid": "0b9e7c1a-3d2f-4e8b-9a61-5c4d2e1f0a77",
-        "id": "RE-3M9XA1",
+        "id": "RE-CHG-3M9XA1",
         "title": "Raise knowledge-base upload limit to 200 MB",
         "created": "2026-09-10T09:00:00Z",
         "created_by": {"name": "Jane Doe", "email": "jane@example.org"},
@@ -107,10 +107,10 @@ def _cr_payload(**overrides: Any) -> dict[str, Any]:
         "body_hash": "sha256:" + "aa11" * 16,
         "scope_hash": "sha256:" + "bb22" * 16,
         "scope": [
-            {"id": "RE-7F3K2Q", "intent": "modify", "base_version": 3},
-            {"id": "RE-9PZ0AH", "intent": "supersede", "base_version": 1},
+            {"id": "RE-STORY-7F3K2Q", "intent": "modify", "base_version": 3},
+            {"id": "RE-FEAT-9PZ0AH", "intent": "supersede", "base_version": 1},
         ],
-        "introduces": ["RE-Q4M2ZT"],
+        "introduces": ["RE-FEAT-Q4M2ZT"],
         "status": "accepted",
         "decisions": [
             {
@@ -201,7 +201,7 @@ def test_identity_roundtrip() -> None:
 
 def test_document_example_payload_parses() -> None:
     document = Document.model_validate(_document_payload())
-    assert document.id == "RE-7F3K2Q"
+    assert document.id == "RE-STORY-7F3K2Q"
     assert document.schema_ == 1
     assert document.created_by is not None
     assert document.created_by.name == "Jane Doe"
@@ -249,8 +249,8 @@ def test_document_optional_fields_may_be_absent(field: str) -> None:
 def test_document_links_sorted_by_type_and_target() -> None:
     document = Document.model_validate(_document_payload())
     assert [(link.type, link.target) for link in document.links] == [
-        ("depends-on", "RE-9PZ0AH"),
-        ("refines", "RE-2K7QMB"),
+        ("depends-on", "RE-FEAT-9PZ0AH"),
+        ("refines", "RE-FEAT-2K7QMB"),
     ]
 
 
@@ -258,7 +258,9 @@ def test_document_rejects_unknown_link_type() -> None:
     with pytest.raises(ValidationError):
         Document.model_validate(
             _document_payload(
-                links=[{"type": "blocks", "target": "RE-2K7QMB", "target_version": 1}]
+                links=[
+                    {"type": "blocks", "target": "RE-FEAT-2K7QMB", "target_version": 1}
+                ]
             )
         )
 
@@ -267,7 +269,11 @@ def test_document_rejects_unknown_link_type() -> None:
     "overrides",
     [
         {"version": 0},
-        {"links": [{"type": "refines", "target": "RE-2K7QMB", "target_version": 0}]},
+        {
+            "links": [
+                {"type": "refines", "target": "RE-FEAT-2K7QMB", "target_version": 0}
+            ]
+        },
         {"template": {"name": "user-story", "version": 0}},
     ],
 )
@@ -282,10 +288,10 @@ def test_document_rejects_non_string_extra_values() -> None:
 
 
 def test_link_roundtrip() -> None:
-    link = Link(type="refines", target="RE-2K7QMB", target_version=4)
+    link = Link(type="refines", target="RE-FEAT-2K7QMB", target_version=4)
     assert _assert_roundtrip(link) == {
         "type": "refines",
-        "target": "RE-2K7QMB",
+        "target": "RE-FEAT-2K7QMB",
         "target_version": 4,
     }
 
@@ -299,7 +305,7 @@ def test_deprecation_roundtrip() -> None:
     deprecation = Deprecation(
         at=datetime(2026, 9, 10, 14, 2, 11, tzinfo=UTC),
         by=None,
-        reason="superseded by RE-2K7QMB",
+        reason="superseded by RE-FEAT-2K7QMB",
     )
     dumped = _assert_roundtrip(deprecation)
     assert dumped["at"] == "2026-09-10T14:02:11Z"
@@ -327,9 +333,9 @@ def test_decision_rejects_unknown_status() -> None:
 
 
 def test_scope_entry_roundtrip() -> None:
-    entry = ScopeEntry(id="RE-7F3K2Q", intent="modify", base_version=3)
+    entry = ScopeEntry(id="RE-STORY-7F3K2Q", intent="modify", base_version=3)
     assert _assert_roundtrip(entry) == {
-        "id": "RE-7F3K2Q",
+        "id": "RE-STORY-7F3K2Q",
         "intent": "modify",
         "base_version": 3,
     }
@@ -337,12 +343,12 @@ def test_scope_entry_roundtrip() -> None:
 
 def test_scope_entry_rejects_unknown_intent() -> None:
     with pytest.raises(ValidationError):
-        ScopeEntry(id="RE-7F3K2Q", intent="rewrite", base_version=3)  # type: ignore[arg-type]
+        ScopeEntry(id="RE-STORY-7F3K2Q", intent="rewrite", base_version=3)  # type: ignore[arg-type]
 
 
 def test_scope_entry_rejects_zero_base_version() -> None:
     with pytest.raises(ValidationError):
-        ScopeEntry(id="RE-7F3K2Q", intent="modify", base_version=0)
+        ScopeEntry(id="RE-STORY-7F3K2Q", intent="modify", base_version=0)
 
 
 def test_template_ref_roundtrip() -> None:
@@ -394,7 +400,7 @@ def test_term_requires_template_per_b3() -> None:
 
 def test_cr_example_payload_parses() -> None:
     cr = ChangeRequest.model_validate(_cr_payload())
-    assert cr.id == "RE-3M9XA1"
+    assert cr.id == "RE-CHG-3M9XA1"
     assert cr.status == "accepted"
     assert cr.decisions[-1].at_version == 2
 
@@ -418,14 +424,14 @@ def test_cr_scope_sorted_by_id_and_introduces_sorted() -> None:
     cr = ChangeRequest.model_validate(
         _cr_payload(
             scope=[
-                {"id": "RE-9PZ0AH", "intent": "modify", "base_version": 1},
-                {"id": "RE-7F3K2Q", "intent": "supersede", "base_version": 3},
+                {"id": "RE-FEAT-9PZ0AH", "intent": "modify", "base_version": 1},
+                {"id": "RE-STORY-7F3K2Q", "intent": "supersede", "base_version": 3},
             ],
-            introduces=["RE-ZZZZZ1", "RE-AAAAA1"],
+            introduces=["RE-FEAT-ZZZZZ1", "RE-FEAT-AAAAA1"],
         )
     )
-    assert [entry.id for entry in cr.scope] == ["RE-7F3K2Q", "RE-9PZ0AH"]
-    assert cr.introduces == ["RE-AAAAA1", "RE-ZZZZZ1"]
+    assert [entry.id for entry in cr.scope] == ["RE-FEAT-9PZ0AH", "RE-STORY-7F3K2Q"]
+    assert cr.introduces == ["RE-FEAT-AAAAA1", "RE-FEAT-ZZZZZ1"]
 
 
 def test_cr_rejects_unknown_status() -> None:
@@ -437,16 +443,16 @@ def test_finding_report_shape_id_subject() -> None:
     finding = Finding(
         code="E-CYCLE",
         severity="E",
-        subject="RE-7F3K2Q",
+        subject="RE-STORY-7F3K2Q",
         message="cycle via refines",
-        fix="gregraph unlink RE-7F3K2Q RE-2K7QMB",
+        fix="gregraph unlink RE-STORY-7F3K2Q RE-FEAT-2K7QMB",
     )
     assert finding.model_dump(mode="json") == {
         "code": "E-CYCLE",
         "severity": "E",
-        "id": "RE-7F3K2Q",
+        "id": "RE-STORY-7F3K2Q",
         "message": "cycle via refines",
-        "fix": "gregraph unlink RE-7F3K2Q RE-2K7QMB",
+        "fix": "gregraph unlink RE-STORY-7F3K2Q RE-FEAT-2K7QMB",
     }
 
 
@@ -454,13 +460,13 @@ def test_finding_report_shape_path_subject_omits_fix() -> None:
     finding = Finding(
         code="E-SIDECAR-MISSING",
         severity="E",
-        subject=Path("documents/RE-7F3K2Q.md"),
+        subject=Path("documents/RE-STORY-7F3K2Q.md"),
         message="missing sidecar",
     )
     assert finding.model_dump(mode="json") == {
         "code": "E-SIDECAR-MISSING",
         "severity": "E",
-        "path": "documents/RE-7F3K2Q.md",
+        "path": "documents/RE-STORY-7F3K2Q.md",
         "message": "missing sidecar",
     }
 
@@ -469,7 +475,7 @@ def test_finding_roundtrip_id_subject() -> None:
     finding = Finding(
         code="W-ORPHAN",
         severity="W",
-        subject="RE-7F3K2Q",
+        subject="RE-STORY-7F3K2Q",
         message="no edges",
         fix=None,
     )
@@ -480,12 +486,12 @@ def test_finding_roundtrip_path_subject() -> None:
     finding = Finding(
         code="W-ASSET-ORPHAN",
         severity="W",
-        subject=Path("assets/RE-7F3K2Q/orphan.png"),
+        subject=Path("assets/RE-STORY-7F3K2Q/orphan.png"),
         message="unreferenced asset",
     )
     restored = Finding.model_validate(finding.model_dump(mode="json"))
     assert restored == finding
-    assert restored.subject == Path("assets/RE-7F3K2Q/orphan.png")
+    assert restored.subject == Path("assets/RE-STORY-7F3K2Q/orphan.png")
 
 
 def test_finding_from_report_shape() -> None:

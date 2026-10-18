@@ -42,6 +42,7 @@ def test_schema_json_payload_shape(repo: Path) -> None:
         "schema",
         "tool_version",
         "id_prefix",
+        "cr_abbreviation",
         "baseline_branch",
         "versioning",
         "graph",
@@ -53,8 +54,9 @@ def test_schema_json_payload_shape(repo: Path) -> None:
         "templates",
         "cr_lifecycle",
     }
-    assert payload["schema"] == 1
+    assert payload["schema"] == 2
     assert payload["id_prefix"] == "RE"
+    assert payload["cr_abbreviation"] == "CHG"
     assert payload["baseline_branch"] == "main"
     assert payload["versioning"] == {
         "on_outdated_links": "block",
@@ -79,7 +81,7 @@ def test_schema_json_types_carry_template_and_prefix(repo: Path) -> None:
     assert story["kind"] == "requirement"
     assert story["folder"] == "user-story"
     assert story["template"] == "user-story"
-    assert story["id_prefix"] == "RE"
+    assert story["abbreviation"] == "STORY"
     assert isinstance(story["description"], str)
 
 
@@ -172,4 +174,4 @@ def test_schema_json_takes_precedence_over_quiet(repo: Path) -> None:
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         assert main(["--repo", str(repo), "schema", "--json", "-q"]) == 0
-    assert json.loads(buffer.getvalue())["schema"] == 1
+    assert json.loads(buffer.getvalue())["schema"] == 2

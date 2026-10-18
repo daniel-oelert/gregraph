@@ -227,100 +227,104 @@ class TestDeriveStatus:
 
 class TestDocumentStatus:
     def test_active_when_tracked_and_identical_to_baseline(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _commit_all(repo, "add doc")
         report = compute_status(_workspace(repo))
-        item = report.documents["RE-AAAAAA"]
+        item = report.documents["RE-STORY-AAAAAA"]
         assert item.status == "active"
         assert item.draft is False
 
     def test_draft_when_untracked(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         report = compute_status(_workspace(repo))
-        item = report.documents["RE-AAAAAA"]
+        item = report.documents["RE-STORY-AAAAAA"]
         assert item.status == "draft"
         assert item.draft is True
 
     def test_draft_when_body_modified(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _commit_all(repo, "add doc")
-        _rewrite_body(repo, "RE-AAAAAA", "# Sample\n\nEdited.\n")
+        _rewrite_body(repo, "RE-STORY-AAAAAA", "# Sample\n\nEdited.\n")
         report = compute_status(_workspace(repo))
-        assert report.documents["RE-AAAAAA"].status == "draft"
+        assert report.documents["RE-STORY-AAAAAA"].status == "draft"
 
     def test_draft_when_sidecar_modified(self, repo: Path) -> None:
-        document = _document("RE-AAAAAA")
+        document = _document("RE-STORY-AAAAAA")
         _write_document(repo, document)
         _commit_all(repo, "add doc")
         changed = document.model_copy(update={"tags": ["edited"]})
         _write_document(repo, changed)
         report = compute_status(_workspace(repo))
-        assert report.documents["RE-AAAAAA"].status == "draft"
+        assert report.documents["RE-STORY-AAAAAA"].status == "draft"
 
     def test_draft_when_committed_on_feature_branch(self, repo: Path) -> None:
         _git(repo, "checkout", "-b", "feature")
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _commit_all(repo, "add doc on feature")
         report = compute_status(_workspace(repo))
-        assert report.documents["RE-AAAAAA"].status == "draft"
+        assert report.documents["RE-STORY-AAAAAA"].status == "draft"
 
     def test_active_after_merge_into_baseline(self, repo: Path) -> None:
         _git(repo, "checkout", "-b", "feature")
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _commit_all(repo, "add doc on feature")
         _git(repo, "checkout", "main")
         _git(repo, "merge", "feature")
         report = compute_status(_workspace(repo))
-        assert report.documents["RE-AAAAAA"].status == "active"
+        assert report.documents["RE-STORY-AAAAAA"].status == "active"
 
     def test_superseded_when_successor_exists(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _write_document(
-            repo, _document("RE-BBBBBB", links=(("supersedes", "RE-AAAAAA"),))
+            repo,
+            _document("RE-STORY-BBBBBB", links=(("supersedes", "RE-STORY-AAAAAA"),)),
         )
         _commit_all(repo, "add docs")
         report = compute_status(_workspace(repo))
-        assert report.documents["RE-AAAAAA"].status == "superseded"
-        assert report.documents["RE-AAAAAA"].superseded is True
-        assert report.documents["RE-BBBBBB"].status == "active"
+        assert report.documents["RE-STORY-AAAAAA"].status == "superseded"
+        assert report.documents["RE-STORY-AAAAAA"].superseded is True
+        assert report.documents["RE-STORY-BBBBBB"].status == "active"
 
     def test_superseded_beats_draft(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _write_document(
-            repo, _document("RE-BBBBBB", links=(("supersedes", "RE-AAAAAA"),))
+            repo,
+            _document("RE-STORY-BBBBBB", links=(("supersedes", "RE-STORY-AAAAAA"),)),
         )
         _commit_all(repo, "add docs")
-        _rewrite_body(repo, "RE-AAAAAA", "# Sample\n\nEdited.\n")
+        _rewrite_body(repo, "RE-STORY-AAAAAA", "# Sample\n\nEdited.\n")
         report = compute_status(_workspace(repo))
-        assert report.documents["RE-AAAAAA"].status == "superseded"
+        assert report.documents["RE-STORY-AAAAAA"].status == "superseded"
 
     def test_deprecated_beats_draft(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA", deprecated=True))
-        _rewrite_body(repo, "RE-AAAAAA", "# Sample\n\nEdited.\n")
+        _write_document(repo, _document("RE-STORY-AAAAAA", deprecated=True))
+        _rewrite_body(repo, "RE-STORY-AAAAAA", "# Sample\n\nEdited.\n")
         report = compute_status(_workspace(repo))
-        assert report.documents["RE-AAAAAA"].status == "deprecated"
+        assert report.documents["RE-STORY-AAAAAA"].status == "deprecated"
 
     def test_deprecated_beats_superseded(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA", deprecated=True))
+        _write_document(repo, _document("RE-STORY-AAAAAA", deprecated=True))
         _write_document(
-            repo, _document("RE-BBBBBB", links=(("supersedes", "RE-AAAAAA"),))
+            repo,
+            _document("RE-STORY-BBBBBB", links=(("supersedes", "RE-STORY-AAAAAA"),)),
         )
         _commit_all(repo, "add docs")
         report = compute_status(_workspace(repo))
-        assert report.documents["RE-AAAAAA"].status == "deprecated"
+        assert report.documents["RE-STORY-AAAAAA"].status == "deprecated"
 
     def test_deprecated_beats_superseded_and_draft(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA", deprecated=True))
+        _write_document(repo, _document("RE-STORY-AAAAAA", deprecated=True))
         _write_document(
-            repo, _document("RE-BBBBBB", links=(("supersedes", "RE-AAAAAA"),))
+            repo,
+            _document("RE-STORY-BBBBBB", links=(("supersedes", "RE-STORY-AAAAAA"),)),
         )
         _commit_all(repo, "add docs")
-        _rewrite_body(repo, "RE-AAAAAA", "# Sample\n\nEdited.\n")
+        _rewrite_body(repo, "RE-STORY-AAAAAA", "# Sample\n\nEdited.\n")
         report = compute_status(_workspace(repo))
-        assert report.documents["RE-AAAAAA"].status == "deprecated"
+        assert report.documents["RE-STORY-AAAAAA"].status == "deprecated"
 
     def test_healthy_repository_has_no_findings(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _commit_all(repo, "add doc")
         report = compute_status(_workspace(repo))
         assert report.findings == ()
@@ -348,15 +352,15 @@ class TestTermStatus:
 
 class TestDegradedMode:
     def test_unknown_without_git_repository(self, plain: Path) -> None:
-        _write_document(plain, _document("RE-AAAAAA"))
+        _write_document(plain, _document("RE-STORY-AAAAAA"))
         report = compute_status(_workspace(plain))
-        assert report.documents["RE-AAAAAA"].status == "unknown"
-        assert report.documents["RE-AAAAAA"].draft is None
+        assert report.documents["RE-STORY-AAAAAA"].status == "unknown"
+        assert report.documents["RE-STORY-AAAAAA"].draft is None
 
     def test_unknown_with_null_adapter(self, plain: Path) -> None:
-        _write_document(plain, _document("RE-AAAAAA"))
+        _write_document(plain, _document("RE-STORY-AAAAAA"))
         report = compute_status(Workspace.open(plain))
-        assert report.documents["RE-AAAAAA"].status == "unknown"
+        assert report.documents["RE-STORY-AAAAAA"].status == "unknown"
 
     def test_unknown_for_terms(self, plain: Path) -> None:
         _write_term(plain, _term("knowledge-base"))
@@ -364,18 +368,19 @@ class TestDegradedMode:
         assert report.terms["knowledge-base"].status == "unknown"
 
     def test_stored_flags_still_resolve(self, plain: Path) -> None:
-        _write_document(plain, _document("RE-AAAAAA", deprecated=True))
-        _write_document(plain, _document("RE-BBBBBB"))
+        _write_document(plain, _document("RE-STORY-AAAAAA", deprecated=True))
+        _write_document(plain, _document("RE-STORY-BBBBBB"))
         _write_document(
-            plain, _document("RE-CCCCCC", links=(("supersedes", "RE-BBBBBB"),))
+            plain,
+            _document("RE-STORY-CCCCCC", links=(("supersedes", "RE-STORY-BBBBBB"),)),
         )
         report = compute_status(_workspace(plain))
-        assert report.documents["RE-AAAAAA"].status == "deprecated"
-        assert report.documents["RE-BBBBBB"].status == "superseded"
-        assert report.documents["RE-CCCCCC"].status == "unknown"
+        assert report.documents["RE-STORY-AAAAAA"].status == "deprecated"
+        assert report.documents["RE-STORY-BBBBBB"].status == "superseded"
+        assert report.documents["RE-STORY-CCCCCC"].status == "unknown"
 
     def test_no_findings(self, plain: Path) -> None:
-        _write_document(plain, _document("RE-AAAAAA"))
+        _write_document(plain, _document("RE-STORY-AAAAAA"))
         report = compute_status(_workspace(plain))
         assert report.findings == ()
 
@@ -387,11 +392,11 @@ class TestMissingBaseline:
         return _init_repo(tmp_path, "trunk")
 
     def test_unknown_with_warning(self, trunk_repo: Path) -> None:
-        _write_document(trunk_repo, _document("RE-AAAAAA"))
+        _write_document(trunk_repo, _document("RE-STORY-AAAAAA"))
         _commit_all(trunk_repo, "add doc")
         report = compute_status(_workspace(trunk_repo))
-        assert report.documents["RE-AAAAAA"].status == "unknown"
-        assert report.documents["RE-AAAAAA"].draft is None
+        assert report.documents["RE-STORY-AAAAAA"].status == "unknown"
+        assert report.documents["RE-STORY-AAAAAA"].draft is None
         [finding] = report.findings
         assert finding.code == "W-BASELINE-MISSING"
         assert finding.severity == "W"
@@ -405,10 +410,10 @@ class TestMissingBaseline:
         assert len(report.findings) == 1
 
     def test_deprecated_still_resolves(self, trunk_repo: Path) -> None:
-        _write_document(trunk_repo, _document("RE-AAAAAA", deprecated=True))
+        _write_document(trunk_repo, _document("RE-STORY-AAAAAA", deprecated=True))
         _commit_all(trunk_repo, "add doc")
         report = compute_status(_workspace(trunk_repo))
-        assert report.documents["RE-AAAAAA"].status == "deprecated"
+        assert report.documents["RE-STORY-AAAAAA"].status == "deprecated"
 
     def test_baseline_branch_comes_from_config(self, tmp_path: Path) -> None:
         _git(tmp_path, "init", "-b", "trunk")
@@ -416,16 +421,16 @@ class TestMissingBaseline:
         _git(tmp_path, "config", "user.email", "test.author@example.org")
         _write_layout(tmp_path, Config(git=GitSection(baseline_branch="trunk")))
         _commit_all(tmp_path, "init")
-        _write_document(tmp_path, _document("RE-AAAAAA"))
+        _write_document(tmp_path, _document("RE-STORY-AAAAAA"))
         _commit_all(tmp_path, "add doc")
         report = compute_status(_workspace(tmp_path))
-        assert report.documents["RE-AAAAAA"].status == "active"
+        assert report.documents["RE-STORY-AAAAAA"].status == "active"
         assert report.findings == ()
 
 
 class TestWip:
     def test_clean_repository_is_not_wip(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _commit_all(repo, "add doc")
         wip = compute_status(_workspace(repo)).wip
         assert wip.is_wip is False
@@ -434,23 +439,23 @@ class TestWip:
         assert wip.uncommitted == ()
 
     def test_untracked_document_is_draft(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         wip = compute_status(_workspace(repo)).wip
         assert wip.is_wip is True
         assert wip.draft_count == 1
-        assert [item.key for item in wip.drafts] == ["RE-AAAAAA"]
+        assert [item.key for item in wip.drafts] == ["RE-STORY-AAAAAA"]
 
     def test_edited_body_is_unbumped_modification(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _commit_all(repo, "add doc")
-        _rewrite_body(repo, "RE-AAAAAA", "# Sample\n\nEdited.\n")
+        _rewrite_body(repo, "RE-STORY-AAAAAA", "# Sample\n\nEdited.\n")
         wip = compute_status(_workspace(repo)).wip
         assert wip.modified_count == 1
-        assert [item.key for item in wip.modified] == ["RE-AAAAAA"]
+        assert [item.key for item in wip.modified] == ["RE-STORY-AAAAAA"]
         assert wip.is_wip is True
 
     def test_sidecar_only_edit_is_not_unbumped(self, repo: Path) -> None:
-        document = _document("RE-AAAAAA")
+        document = _document("RE-STORY-AAAAAA")
         _write_document(repo, document)
         _commit_all(repo, "add doc")
         _write_document(repo, document.model_copy(update={"tags": ["edited"]}))
@@ -460,7 +465,7 @@ class TestWip:
 
     def test_committed_draft_counts_without_uncommitted(self, repo: Path) -> None:
         _git(repo, "checkout", "-b", "feature")
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _commit_all(repo, "add doc on feature")
         wip = compute_status(_workspace(repo)).wip
         assert wip.is_wip is True
@@ -482,28 +487,31 @@ class TestWip:
         assert wip.is_wip is False
 
     def test_staged_file_is_still_uncommitted(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
-        body_rel, sidecar_rel = document_paths(Path(), "user-story", "RE-AAAAAA")
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
+        body_rel, sidecar_rel = document_paths(Path(), "user-story", "RE-STORY-AAAAAA")
         _git(repo, "add", body_rel.as_posix(), sidecar_rel.as_posix())
         wip = compute_status(_workspace(repo)).wip
         assert wip.is_wip is True
         assert wip.uncommitted != ()
 
     def test_counts_feed_the_status_header(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
-        _write_document(repo, _document("RE-BBBBBB"))
-        _write_document(repo, _document("RE-CCCCCC"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-BBBBBB"))
+        _write_document(repo, _document("RE-STORY-CCCCCC"))
         _commit_all(repo, "add docs")
-        _rewrite_body(repo, "RE-CCCCCC", "# Sample\n\nEdited.\n")
+        _rewrite_body(repo, "RE-STORY-CCCCCC", "# Sample\n\nEdited.\n")
         _git(repo, "checkout", "-b", "feature")
-        _write_document(repo, _document("RE-DDDDDD"))
+        _write_document(repo, _document("RE-STORY-DDDDDD"))
         _commit_all(repo, "add draft on feature")
         wip = compute_status(_workspace(repo)).wip
         assert wip.is_wip is True
         assert wip.draft_count == 2
         assert wip.modified_count == 1
-        assert {item.key for item in wip.drafts} == {"RE-CCCCCC", "RE-DDDDDD"}
-        assert [item.key for item in wip.modified] == ["RE-CCCCCC"]
+        assert {item.key for item in wip.drafts} == {
+            "RE-STORY-CCCCCC",
+            "RE-STORY-DDDDDD",
+        }
+        assert [item.key for item in wip.modified] == ["RE-STORY-CCCCCC"]
 
     def test_term_modifications_count(self, plain: Path) -> None:
         _write_term(plain, _term("knowledge-base"))
@@ -514,8 +522,8 @@ class TestWip:
         assert wip.is_wip is True
 
     def test_degraded_mode_sees_unbumped_modifications(self, plain: Path) -> None:
-        _write_document(plain, _document("RE-AAAAAA"))
-        _rewrite_body(plain, "RE-AAAAAA", "# Sample\n\nEdited.\n")
+        _write_document(plain, _document("RE-STORY-AAAAAA"))
+        _rewrite_body(plain, "RE-STORY-AAAAAA", "# Sample\n\nEdited.\n")
         wip = compute_status(_workspace(plain)).wip
         assert wip.modified_count == 1
         assert wip.draft_count == 0
@@ -532,20 +540,29 @@ class TestWip:
 class TestOpenConflicts:
     def test_counts_live_pair(self, repo: Path) -> None:
         _write_document(
-            repo, _document("RE-AAAAAA", links=(("conflicts-with", "RE-BBBBBB"),))
+            repo,
+            _document(
+                "RE-STORY-AAAAAA", links=(("conflicts-with", "RE-STORY-BBBBBB"),)
+            ),
         )
-        _write_document(repo, _document("RE-BBBBBB"))
+        _write_document(repo, _document("RE-STORY-BBBBBB"))
         _commit_all(repo, "add docs")
         report = compute_status(_workspace(repo))
-        assert report.open_conflicts == (("RE-AAAAAA", "RE-BBBBBB"),)
+        assert report.open_conflicts == (("RE-STORY-AAAAAA", "RE-STORY-BBBBBB"),)
         assert report.open_conflict_count == 1
 
     def test_symmetric_recorded_both_ways_counted_once(self, repo: Path) -> None:
         _write_document(
-            repo, _document("RE-AAAAAA", links=(("conflicts-with", "RE-BBBBBB"),))
+            repo,
+            _document(
+                "RE-STORY-AAAAAA", links=(("conflicts-with", "RE-STORY-BBBBBB"),)
+            ),
         )
         _write_document(
-            repo, _document("RE-BBBBBB", links=(("conflicts-with", "RE-AAAAAA"),))
+            repo,
+            _document(
+                "RE-STORY-BBBBBB", links=(("conflicts-with", "RE-STORY-AAAAAA"),)
+            ),
         )
         _commit_all(repo, "add docs")
         report = compute_status(_workspace(repo))
@@ -553,20 +570,27 @@ class TestOpenConflicts:
 
     def test_deprecated_endpoint_closes_conflict(self, repo: Path) -> None:
         _write_document(
-            repo, _document("RE-AAAAAA", links=(("conflicts-with", "RE-BBBBBB"),))
+            repo,
+            _document(
+                "RE-STORY-AAAAAA", links=(("conflicts-with", "RE-STORY-BBBBBB"),)
+            ),
         )
-        _write_document(repo, _document("RE-BBBBBB", deprecated=True))
+        _write_document(repo, _document("RE-STORY-BBBBBB", deprecated=True))
         _commit_all(repo, "add docs")
         report = compute_status(_workspace(repo))
         assert report.open_conflict_count == 0
 
     def test_superseded_endpoint_closes_conflict(self, repo: Path) -> None:
         _write_document(
-            repo, _document("RE-AAAAAA", links=(("conflicts-with", "RE-BBBBBB"),))
+            repo,
+            _document(
+                "RE-STORY-AAAAAA", links=(("conflicts-with", "RE-STORY-BBBBBB"),)
+            ),
         )
-        _write_document(repo, _document("RE-BBBBBB"))
+        _write_document(repo, _document("RE-STORY-BBBBBB"))
         _write_document(
-            repo, _document("RE-CCCCCC", links=(("supersedes", "RE-BBBBBB"),))
+            repo,
+            _document("RE-STORY-CCCCCC", links=(("supersedes", "RE-STORY-BBBBBB"),)),
         )
         _commit_all(repo, "add docs")
         report = compute_status(_workspace(repo))
@@ -576,26 +600,29 @@ class TestOpenConflicts:
         _write_document(
             repo,
             _document(
-                "RE-AAAAAA",
+                "RE-STORY-AAAAAA",
                 links=(
-                    ("conflicts-with", "RE-BBBBBB"),
-                    ("conflicts-with", "RE-CCCCCC"),
+                    ("conflicts-with", "RE-STORY-BBBBBB"),
+                    ("conflicts-with", "RE-STORY-CCCCCC"),
                 ),
             ),
         )
-        _write_document(repo, _document("RE-BBBBBB"))
-        _write_document(repo, _document("RE-CCCCCC"))
+        _write_document(repo, _document("RE-STORY-BBBBBB"))
+        _write_document(repo, _document("RE-STORY-CCCCCC"))
         _commit_all(repo, "add docs")
         report = compute_status(_workspace(repo))
         assert report.open_conflicts == (
-            ("RE-AAAAAA", "RE-BBBBBB"),
-            ("RE-AAAAAA", "RE-CCCCCC"),
+            ("RE-STORY-AAAAAA", "RE-STORY-BBBBBB"),
+            ("RE-STORY-AAAAAA", "RE-STORY-CCCCCC"),
         )
         assert report.open_conflict_count == 2
 
     def test_dangling_target_not_counted(self, repo: Path) -> None:
         _write_document(
-            repo, _document("RE-AAAAAA", links=(("conflicts-with", "RE-ZZZZZZ"),))
+            repo,
+            _document(
+                "RE-STORY-AAAAAA", links=(("conflicts-with", "RE-STORY-ZZZZZZ"),)
+            ),
         )
         _commit_all(repo, "add doc")
         report = compute_status(_workspace(repo))
@@ -603,34 +630,39 @@ class TestOpenConflicts:
 
     def test_open_conflicts_helper_uses_the_graph(self, repo: Path) -> None:
         _write_document(
-            repo, _document("RE-AAAAAA", links=(("conflicts-with", "RE-BBBBBB"),))
+            repo,
+            _document(
+                "RE-STORY-AAAAAA", links=(("conflicts-with", "RE-STORY-BBBBBB"),)
+            ),
         )
-        _write_document(repo, _document("RE-BBBBBB"))
+        _write_document(repo, _document("RE-STORY-BBBBBB"))
         _commit_all(repo, "add docs")
         workspace = _workspace(repo)
-        assert open_conflicts(workspace.graph) == (("RE-AAAAAA", "RE-BBBBBB"),)
+        assert open_conflicts(workspace.graph) == (
+            ("RE-STORY-AAAAAA", "RE-STORY-BBBBBB"),
+        )
 
 
 class TestStatusReport:
     def test_reports_documents_and_terms(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _write_term(repo, _term("knowledge-base"))
         _commit_all(repo, "add items")
         report = compute_status(_workspace(repo))
-        assert set(report.documents) == {"RE-AAAAAA"}
+        assert set(report.documents) == {"RE-STORY-AAAAAA"}
         assert set(report.terms) == {"knowledge-base"}
-        assert isinstance(report.documents["RE-AAAAAA"], ItemStatus)
-        assert report.documents["RE-AAAAAA"].body == Path(
-            "documents/user-story/RE-AAAAAA.md"
+        assert isinstance(report.documents["RE-STORY-AAAAAA"], ItemStatus)
+        assert report.documents["RE-STORY-AAAAAA"].body == Path(
+            "documents/user-story/RE-STORY-AAAAAA.md"
         )
-        assert report.documents["RE-AAAAAA"].sidecar == Path(
-            "documents/user-story/RE-AAAAAA.json"
+        assert report.documents["RE-STORY-AAAAAA"].sidecar == Path(
+            "documents/user-story/RE-STORY-AAAAAA.json"
         )
-        assert report.documents["RE-AAAAAA"].deprecated is False
-        assert report.documents["RE-AAAAAA"].superseded is False
+        assert report.documents["RE-STORY-AAAAAA"].deprecated is False
+        assert report.documents["RE-STORY-AAAAAA"].superseded is False
 
     def test_report_is_plain_data(self, repo: Path) -> None:
-        _write_document(repo, _document("RE-AAAAAA"))
+        _write_document(repo, _document("RE-STORY-AAAAAA"))
         _commit_all(repo, "add doc")
         report = compute_status(_workspace(repo))
         payload: dict[str, Any] = {
@@ -639,7 +671,7 @@ class TestStatusReport:
             "conflicts": report.open_conflict_count,
         }
         assert payload == {
-            "documents": {"RE-AAAAAA": "active"},
+            "documents": {"RE-STORY-AAAAAA": "active"},
             "wip": False,
             "conflicts": 0,
         }

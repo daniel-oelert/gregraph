@@ -61,7 +61,7 @@ def _current_hash(sample: SampleGraph, doc_id: str) -> str:
     return body_hash(read_body(body))
 
 
-def _add_change_request(root: Path, cr_id: str = "CR-ABCDEF") -> str:
+def _add_change_request(root: Path, cr_id: str = "RE-CHG-ABCDEF") -> str:
     """Write an open change request under ``changes/`` (spec §9.2)."""
     cr = ChangeRequest(
         schema=1,
@@ -417,7 +417,7 @@ def test_update_body_valid_text_has_no_findings(sample_graph: SampleGraph) -> No
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("bad", ["RE-ZZZZZZ", "not-an-id", "", "  "])
+@pytest.mark.parametrize("bad", ["RE-STORY-ZZZZZZ", "not-an-id", "", "  "])
 def test_update_body_unknown_or_malformed_id_refused(
     sample_graph: SampleGraph, bad: str
 ) -> None:

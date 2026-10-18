@@ -138,7 +138,7 @@ def test_link_unknown_source_refused_exits_4(
 ) -> None:
     root = sample_graph.root
     goal = sample_graph.ids["goal"]
-    assert main(["--repo", str(root), "link", "RE-NOSUCH", "refines", goal]) == 4
+    assert main(["--repo", str(root), "link", "RE-STORY-ZZZZZZ", "refines", goal]) == 4
     assert "E-ID-UNKNOWN" in capsys.readouterr().err
 
 
@@ -277,7 +277,15 @@ def test_link_candidates_unknown_source_refused_exits_4(
     sample_graph: SampleGraph, capsys
 ) -> None:
     assert (
-        main(["--repo", str(sample_graph.root), "link", "--candidates", "RE-NOSUCH"])
+        main(
+            [
+                "--repo",
+                str(sample_graph.root),
+                "link",
+                "--candidates",
+                "RE-STORY-ZZZZZZ",
+            ]
+        )
         == 4
     )
     assert "E-ID-UNKNOWN" in capsys.readouterr().err

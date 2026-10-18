@@ -42,7 +42,7 @@ def sample_document() -> Document:
     return Document(
         schema=1,
         uuid=UUID("00000000-0000-4000-8000-000000000001"),
-        id="RE-AAAAAA",
+        id="RE-STORY-AAAAAA",
         type="user-story",
         title="Upload from the desktop",
         created=dt.datetime(2026, 9, 10, 14, 2, 11, tzinfo=dt.UTC),
@@ -51,7 +51,7 @@ def sample_document() -> Document:
         version=2,
         body_hash="sha256:abc",
         assets=[],
-        links=[Link(type="refines", target="RE-BBBBB", target_version=1)],
+        links=[Link(type="refines", target="RE-STORY-BBBBBB", target_version=1)],
         deprecated=None,
         tags=["ux"],
         extra={},
@@ -98,12 +98,12 @@ def test_plain_finding_id_subject_and_fix() -> None:
     finding = Finding(
         code="W-ORPHAN",
         severity="W",
-        subject="RE-AAAAAA",
+        subject="RE-STORY-AAAAAA",
         message="no edges",
         fix="gregraph link",
     )
     line = format_finding(finding)
-    assert line == "W-ORPHAN RE-AAAAAA: no edges (fix: gregraph link)"
+    assert line == "W-ORPHAN RE-STORY-AAAAAA: no edges (fix: gregraph link)"
 
 
 def test_colour_finding_paints_severity() -> None:
@@ -160,10 +160,10 @@ def test_canonical_json_sorted_indent_trailing_newline() -> None:
 def test_document_payload_sidecar_fields_plus_status() -> None:
     payload = document_payload(sample_document(), status="active", kind="requirement")
     assert payload["schema"] == 1
-    assert payload["id"] == "RE-AAAAAA"
+    assert payload["id"] == "RE-STORY-AAAAAA"
     assert payload["status"] == "active"
     assert payload["kind"] == "requirement"
-    assert payload["links"][0]["target"] == "RE-BBBBB"
+    assert payload["links"][0]["target"] == "RE-STORY-BBBBBB"
     assert payload["created"] == "2026-09-10T14:02:11Z"
 
 

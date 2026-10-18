@@ -246,7 +246,7 @@ def test_context_unknown_id_refused_exits_4(repo: Path, capsys) -> None:
     _chain(repo)
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(io.StringIO()):
-        assert main(["--repo", str(repo), "context", "RE-NOSUCH", "--json"]) == 4
+        assert main(["--repo", str(repo), "context", "RE-STORY-ZZZZZZ", "--json"]) == 4
     envelope = json.loads(buffer.getvalue())
     assert envelope["error"]["code"] == "E-ID-UNKNOWN"
     assert capsys.readouterr().err == ""

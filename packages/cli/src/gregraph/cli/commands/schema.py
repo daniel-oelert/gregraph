@@ -23,6 +23,7 @@ def _json_payload(info: SchemaInfo) -> dict[str, object]:
         "schema": info.schema_,
         "tool_version": info.tool_version,
         "id_prefix": info.id_prefix,
+        "cr_abbreviation": info.cr_abbreviation,
         "baseline_branch": info.baseline_branch,
         "versioning": info.versioning,
         "graph": info.graph,
@@ -61,6 +62,7 @@ def _print_config(app: App, info: SchemaInfo) -> None:
     out.mapping_lines(
         {
             "id prefix": info.id_prefix,
+            "cr abbreviation": info.cr_abbreviation,
             "baseline branch": info.baseline_branch,
         }
     )
@@ -81,14 +83,14 @@ def _print_types(app: App, info: SchemaInfo) -> None:
     out = app.out
     out.line("types:")
     out.table(
-        ["TYPE", "KIND", "FOLDER", "TEMPLATE", "ID-PREFIX", "DESCRIPTION"],
+        ["TYPE", "ABBREV", "KIND", "FOLDER", "TEMPLATE", "DESCRIPTION"],
         [
             [
                 name,
+                spec.abbreviation,
                 spec.kind,
                 spec.folder,
                 spec.template,
-                spec.id_prefix,
                 spec.description,
             ]
             for name, spec in sorted(info.types.items())

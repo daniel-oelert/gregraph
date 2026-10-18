@@ -1,15 +1,16 @@
-# GREGraph — Design Document, revision 0.4
+# GREGraph — Design Document, revision 0.5
 
 **GREGraph** — Git-aware Requirements Engineering Graph. CLI command: `gregraph`.
 
-This revision specifies tool release **0.1.0**. Document revisions (r0.1, r0.2, …) are numbered independently of tool releases. Everywhere else in this document, "v0.1" and "v0.2" refer to **tool releases**.
+This revision specifies tool release **0.2.0**. Document revisions (r0.1, r0.2, …) are numbered independently of tool releases. Everywhere else in this document, "v0.1" and "v0.2" refer to **tool releases**.
 
-Document status: design baseline for the first implementation. Date: 2026-09-10. License: private.
+Document status: design baseline for the first implementation. Date: 2026-09-10, amended 2026-10-18. License: private.
 
 ### Revision history
 
 | Revision | Date | Changes |
 |---|---|---|
+| r0.5 | 2026-10-18 | Typed document identifiers: `<PREFIX>-<ABBREVIATION>-<6-char Crockford body>` with a required, unique per-type abbreviation; fixed `CHG` abbreviation for change requests. Config schema 2 (schema-1 configs are refused with exit 3); hard cutover with no legacy aliases. New codes `E-ID-LEGACY` and `E-TYPE-ABBREVIATION-CHANGED`; `E-ID-DERIVATION` covers prefix and abbreviation. Standalone `scripts/migrate_type_ids.py` migration with preserved versions and recomputed hashes. Sections 1.3, 2, 3, 4, 5.3–5.4, 7.2–7.3, 9.1–9.2, 13 general and 13.24, 14, 15, 16.1, 16.4–16.5, Appendix B.1 and B.3, and 20 amended; decision D-TYPED-IDS in `docs/decisions.md`. |
 | r0.4 | 2026-10-16 | Amendment A2 (agent readiness, per `AGENT_READINESS.md`; decisions D-AGENT-1…D-AGENT-9 in `docs/decisions.md`). Universal `--json` contract with error envelopes on stdout (§13 general); template-guided authoring flags and rich `new --json` (§13.2, §13.14, §13.18, §13.20, §13.23); uncommitted-`v1` initial-grace period and the `initialised` reconcile bucket (§7.2, §7.4, §7.5); effective-version link freshness, `E-LINK-VERSION-AHEAD` vs `W-LINK-PENDING` (§7.4, §14); explicit-only prose mention syntax (§4.5, §5.2, §9.7, §14); introspection commands `schema` and `context`, `link --candidates`, richer `template show --json`, `list --body`, multi-ID `show` (§13.3, §13.10, §13.11, §13.17, §13.24, §13.25); agent scaffolding `AGENTS.md` + `.agents/skills/gregraph/SKILL.md` written by `init`, refreshed by `sync` and `repair agents` (§3, §13.1, §13.7, §13.19); finding `details` and authoring refusal codes (§14); layout additions (§16.1); `update_body` reused by CLI `edit` (§21.5). |
 | r0.1 | 2026-09-10 | Initial design. |
 | r0.3 | 2026-10-14 | Amendment A1 (section 21): optional local web UI as a third, optional distribution (`gregraph-webui`) with a foreground loopback-only `serve` command, a body-write operation with `E-BODY-STALE`, and narrow amendments to sections 1.2, 1.4, 7, 13, 14, 16 and BOOT-205. Baseline sections are otherwise unchanged. |
@@ -17,7 +18,7 @@ Document status: design baseline for the first implementation. Date: 2026-09-10.
 
 ## 0. How to read this document
 
-This document is the complete specification for GREGraph v0.1. It is written for a coding agent that will build the tool from scratch in Python. Sections 1–15 specify behaviour; sections 16–19 specify engineering, testing, milestones, and the bootstrapping plan; the appendices contain the initial requirement set, default configuration, JSON schemas, and the `AGENTS.md` for the implementation repository.
+This document is the complete specification for GREGraph (this revision specifies tool release 0.2.0). It is written for a coding agent that will build the tool from scratch in Python. Sections 1–15 specify behaviour; sections 16–19 specify engineering, testing, milestones, and the bootstrapping plan; the appendices contain the initial requirement set, default configuration, JSON schemas, and the `AGENTS.md` for the implementation repository.
 
 Where the requirements engineer left a question open and asked for an evaluation, this document evaluates the options and **takes a decision**. Every such decision is marked `[DECISION]` and collected in section 20 so it can be revisited before or during implementation. The agent implements the decisions as written unless told otherwise.
 
@@ -26,6 +27,8 @@ Normative words: **must** (required), **should** (default, deviations need a doc
 Section 21 (Amendment A1, revision 0.3) adds an optional local web UI. It is authoritative for the optional extension and lists every earlier statement it supersedes. It does not change the v0.1 baseline otherwise; sections 0–20 and Appendices A–C remain the historical record.
 
 Revision 0.4 (Amendment A2, agent readiness) amends the sections listed in the revision history **in place** — it adds no new top-level section beyond §13.24/§13.25. `AGENT_READINESS.md` is its source specification; `docs/decisions.md` records the `D-AGENT-1`…`D-AGENT-9` decisions. No new runtime dependencies are introduced and the optional web UI extension is unchanged.
+
+Revision 0.5 (typed identifiers) likewise amends the sections listed in the revision history in place. `docs/decisions.md` records D-TYPED-IDS; `docs/migration-typed-ids.md` is the operator guide for the standalone migration.
 
 ---
 
@@ -50,7 +53,7 @@ GREGraph is a local, Git-synchronised, Markdown-based requirements management to
 
 - Repository initialisation with shipped, versioned templates copied into the repository.
 - Document types (user-definable) grouped by a fixed set of *kinds*; graph nodes as one Markdown + one JSON per document.
-- Stable, non-semantic, collision-checked identifiers.
+- Stable, collision-checked identifiers that carry metadata (the repository prefix and the document type's abbreviation); the random body remains non-semantic.
 - Directed acyclic graph with a fixed set of edge types and kind-based rules enforced at link time.
 - Document versioning by content hash, bumped at commit time (Git) or on sync (no Git).
 - Link freshness tracking (links record the target version they were confirmed against).
@@ -95,14 +98,14 @@ GREGraph is a local, Git-synchronised, Markdown-based requirements management to
 | **Document** | One Markdown file plus its JSON sidecar. Exactly one graph node per document. |
 | **Node** | A document as a vertex of the graph. |
 | **Kind** | One of a fixed set of categories the tool understands: `goal`, `requirement`, `design`, `verification`, `information`. Edge rules are written against kinds. |
-| **Type** | A user-defined document type (e.g. `feature`, `user-story`, `test-case`). Every type declares exactly one kind and a default template. |
+| **Type** | A user-defined document type (e.g. `feature`, `user-story`, `test-case`). Every type declares exactly one kind, a unique abbreviation and a default template. |
 | **Edge / link** | A typed, directed relationship between two nodes, stored in the source node's JSON. |
 | **Template** | A versioned Markdown skeleton plus JSON descriptor that defines the sections of a document body. |
 | **Version** | Integer counter per document, incremented when the body or assets change (at commit in Git mode). |
 | **Baseline branch** | The Git branch that represents accepted requirements. Configurable, default `main`. |
 | **Draft** | A document whose content differs from the baseline branch or does not exist there. |
 | **Baseline** | An annotated Git tag marking a named state of the baseline branch. |
-| **Change request (CR)** | A first-class entity outside the graph describing a proposed change to a set of documents (its *scope*). Shares the ID space with documents. |
+| **Change request (CR)** | A first-class entity outside the graph describing a proposed change to a set of documents (its *scope*). Shares the ID space with documents and uses the reserved abbreviation `CHG`. |
 | **Scope entry** | A CR's reference to an existing document, with an intent (`modify`, `supersede`, `deprecate`) and the *base version* the CR was analysed against. |
 | **Drift** | A scope target changed on the baseline branch, by something other than the CR, after the CR recorded its base version. |
 | **Proposed / effective status** | A CR's status in the working tree / on the baseline branch. |
@@ -126,16 +129,16 @@ GREGraph is a local, Git-synchronised, Markdown-based requirements management to
 │       └── index.json
 ├── documents/
 │   └── <folder-per-type>/          # default folder = type name; config may override
-│       ├── RE-7F3K2Q.md
-│       └── RE-7F3K2Q.json
+│       ├── RE-STORY-7F3K2Q.md
+│       └── RE-STORY-7F3K2Q.json
 ├── changes/
-│   ├── RE-3M9XA1.md
-│   └── RE-3M9XA1.json
+│   ├── RE-CHG-3M9XA1.md
+│   └── RE-CHG-3M9XA1.json
 ├── glossary/
 │   ├── knowledge-base.md
 │   └── knowledge-base.json
 ├── assets/
-│   └── RE-7F3K2Q/                  # one folder per owning document, created on demand
+│   └── RE-STORY-7F3K2Q/            # one folder per owning document, created on demand
 │       └── upload-flow.png
 ├── .gitignore                      # contains .gregraph/cache/
 ├── AGENTS.md                       # agent instructions; delimited managed block (13.1)
@@ -162,36 +165,43 @@ Rules:
 
 ### 4.1 Format
 
-`<PREFIX>-<6 chars Crockford base32>`, e.g. `RE-7F3K2Q`.
+`<PREFIX>-<ABBREVIATION>-<6 chars Crockford base32>`, e.g. `RE-FEAT-7F3K2Q`.
 
-- `PREFIX` is a constant, non-semantic, repository-wide string configured in `config.toml` (`ids.prefix`), default `RE`. It carries no type information. Allowed characters: `[A-Z][A-Z0-9]{0,7}`.
-- The 6-character body is the Crockford base32 encoding of the first 30 bits of the document's UUIDv4. Alphabet: `0123456789ABCDEFGHJKMNPQRSTVWXYZ` (no I, L, O, U). Always uppercase.
-- Space: 2^30 ≈ 1.07 × 10^9. Expected collisions at 5,000 documents ≈ 0.012, at 10,000 ≈ 0.047.
+- `PREFIX` is a constant, non-semantic, repository-wide string configured in `config.toml` (`ids.prefix`), default `RE`. Allowed characters: `[A-Z][A-Z0-9]{0,7}`.
+- `ABBREVIATION` is type metadata: the abbreviation configured for the document's type (§5.3), `[A-Z]{3,5}`, unique across the configured types. Change requests always use the fixed, reserved abbreviation `CHG`; no document type may use `CHG`.
+- The 6-character body is the Crockford base32 encoding of the first 30 bits of the document's UUIDv4. Alphabet: `0123456789ABCDEFGHJKMNPQRSTVWXYZ` (no I, L, O, U). Always uppercase. The body remains random and non-semantic.
+- Space: 2^30 ≈ 1.07 × 10^9 per `(PREFIX, ABBREVIATION)` pair. Expected collisions at 5,000 documents ≈ 0.012, at 10,000 ≈ 0.047.
+
+The prefix and the abbreviation carry metadata; only the six-character body is random. An identifier is therefore *stable and type-tagged*, not purely non-semantic.
 
 ### 4.2 Generation
 
 1. Generate UUIDv4.
-2. Derive the human ID.
+2. Derive the human ID: configured prefix, the abbreviation of the document's type (or `CHG` for a change request), and the 6-character body.
 3. If the ID exists in the loaded index (including deprecated and superseded documents and CRs), discard the UUID and repeat. Repeat at most 100 times, then fail with an internal error.
 4. Store both `uuid` and `id` in the sidecar. The `id` is the only identifier used in filenames, links, and CLI; the `uuid` is the tie-breaker if two branches ever produce the same ID (see 4.4).
+
+A document's type is immutable after creation (§5.3), so its abbreviation — and therefore the type segment of its ID — never changes.
 
 ### 4.3 Invariants
 
 - IDs are never reused, including after deprecation or supersession. Documents are never hard-deleted by the tool.
 - `id` must equal the filename stem.
-- `id` must be derivable from `uuid` with the configured prefix; `validate` checks this.
-- The prefix is fixed at `init`. Changing it later is a manual, unsupported operation in v0.1 (`validate` reports every document whose prefix mismatches).
+- `id` must be derivable from `uuid` with the configured prefix and the abbreviation of the document's type (`CHG` for a CR); `validate` checks this (`E-ID-DERIVATION`).
+- The prefix is fixed at `init`. Changing it later is a manual, unsupported operation (`validate` reports every document whose prefix mismatches).
+- An abbreviation is fixed once any document of that type exists. Changing it is a hard error (`E-TYPE-ABBREVIATION-CHANGED`); if no document of the type exists, it may be changed freely. Abbreviations are unique across types and `CHG` is reserved.
+- Only the three-segment form is valid. Two-segment IDs created before config schema 2 are rejected everywhere (`E-ID-LEGACY`); there are no legacy aliases and no dual-format period.
 
 ### 4.4 Cross-branch collisions
 
-Random generation makes collisions across branches improbable but not impossible. If a merge produces two documents with the same `id` and different `uuid` values, `validate` reports a fatal error `E-ID-DUPLICATE` listing both UUIDs. Resolution is manual in v0.1: the user deletes one of the two documents (the tool provides `gregraph repair regenerate-id <path>` — see 13.19 — which regenerates a new UUID/ID for one of them and rewrites inbound links that reference it *from the same branch's history* — inbound links cannot be disambiguated automatically, so the command lists them for manual re-linking).
+Random generation makes collisions across branches improbable but not impossible. If a merge produces two documents with the same `id` and different `uuid` values, `validate` reports a fatal error `E-ID-DUPLICATE` listing both UUIDs. Resolution is manual: the user deletes one of the two documents (the tool provides `gregraph repair regenerate-id <path>` — see 13.19 — which regenerates a new UUID/ID for one of them and rewrites inbound links that reference it *from the same branch's history* — inbound links cannot be disambiguated automatically, so the command lists them for manual re-linking).
 
 ### 4.5 Parsing and matching
 
-- Case-insensitive on input, normalised to uppercase. `re-7f3k2q` matches `RE-7F3K2Q`.
-- The tool accepts the ID with or without prefix on the command line if unambiguous.
+- The canonical form is always required: three segments, uppercase on disk and in prose. Case-insensitive input is normalised to uppercase, so `re-feat-7f3k2q` matches `RE-FEAT-7F3K2Q`.
+- The tool accepts the ID with or without the prefix on the command line if unambiguous (`FEAT-7F3K2Q`). It never accepts the old two-segment form (`RE-7F3K2Q`); such an argument is an unknown ID.
 - Interactive pickers match on ID substring and title substring, case-insensitive.
-- (r0.4) The case-insensitivity above applies to **input arguments only**. Prose mentions (5.2) require the canonical uppercase form: `[[re-7f3k2q]]` in a body is ordinary prose, never a mention.
+- (r0.4) The case-insensitivity above applies to **input arguments only**. Prose mentions (5.2) require the canonical uppercase form: `[[re-feat-7f3k2q]]` in a body is ordinary prose, never a mention. The old two-segment form matches neither documents nor CRs.
 
 ---
 
@@ -210,10 +220,10 @@ Every document is exactly one Markdown file and one JSON sidecar with the same s
 - Section structure is defined by the template (5.5). Headings at level 2 are template sections. Users may add level-3+ headings freely inside sections. Users may add extra level-2 sections; `validate` reports them as warnings `W-SECTION-UNKNOWN` (not errors), so that templates can be extended organically.
 - References in the body (r0.4, explicit syntax only): a prose *mention* is recognised **only** in explicit reference syntax, never as a bare ID-shaped token:
   - a WikiLink `[[ID]]` or `[[ID|label]]`; or
-  - a Markdown link `[text](target)` where `target` matches the ID pattern (case-sensitive), **or** `target` is a relative link that, resolved against the document's directory, names a managed `.md` file whose stem matches the ID pattern (e.g. `[RE-7F3K2Q](../features/RE-7F3K2Q.md)`), **or** the trimmed link `text` matches the ID pattern.
+  - a Markdown link `[text](target)` where `target` matches the ID pattern (case-sensitive), **or** `target` is a relative link that, resolved against the document's directory, names a managed `.md` file whose stem matches the ID pattern (e.g. `[RE-STORY-7F3K2Q](../user-stories/RE-STORY-7F3K2Q.md)`), **or** the trimmed link `text` matches the ID pattern.
 
-  Mention IDs are canonical uppercase (4.5); `[[re-7f3k2q]]` is prose. Mentions inside fenced code blocks, code spans and HTML are ignored. Asset links (targets landing in `assets/<ID>/`) remain asset references, never mentions (5.7). A mention is **not** a graph edge. `validate` reports `W-MENTION-UNLINKED` when a document body contains an explicit mention of a document ID with no edge in either direction, and `E-MENTION-UNKNOWN` when an explicit mention matches neither a document nor a CR. Document bodies may mention CR IDs freely; CRs are not graph nodes, so no `W-MENTION-UNLINKED` is raised for them. Mentions inside CR bodies follow section 9.7. (Glossary term usage, 10.2, is unaffected: term matching is name/alias based, not ID based.)
-- Images: `![alt](../../assets/RE-7F3K2Q/file.png)`; see 5.7.
+  Mention IDs are canonical uppercase (4.5); `[[re-story-7f3k2q]]` is prose. Mentions inside fenced code blocks, code spans and HTML are ignored. Asset links (targets landing in `assets/<ID>/`) remain asset references, never mentions (5.7). A mention is **not** a graph edge. `validate` reports `W-MENTION-UNLINKED` when a document body contains an explicit mention of a document ID with no edge in either direction, and `E-MENTION-UNKNOWN` when an explicit mention matches neither a document nor a CR. Document bodies may mention CR IDs freely; CRs are not graph nodes, so no `W-MENTION-UNLINKED` is raised for them. Mentions inside CR bodies follow section 9.7. (Glossary term usage, 10.2, is unaffected: term matching is name/alias based, not ID based.)
+- Images: `![alt](../../assets/RE-STORY-7F3K2Q/file.png)`; see 5.7.
 
 ### 5.3 Kinds and types
 
@@ -234,12 +244,14 @@ Change requests are not documents and have no kind; they live outside the graph 
 ```toml
 [types.user-story]
 kind = "requirement"
+abbreviation = "STORY"      # [A-Z]{3,5}, unique across types; required
 template = "user-story"     # default template name; latest non-deprecated version is used
 folder = "user-stories"     # optional; default = type name
 ```
 
 - Type names: `[a-z][a-z0-9-]*`, unique.
-- A type's `kind` is immutable once any document of that type exists (`validate` enforces: `E-TYPE-KIND-CHANGED` if the index cache disagrees with config; the cache stores the kind seen at last run). If no document of the type exists, it may be changed freely.
+- Every type has a required `abbreviation`, matching `[A-Z]{3,5}` and unique across all configured types. `CHG` is reserved for change requests and may not be used by a document type. The abbreviation is the type segment of every ID of that type (§4.1). A missing, malformed, duplicate or reserved abbreviation is a configuration error (exit 3).
+- A type's `kind` and `abbreviation` are immutable once any document of that type exists (`validate` enforces `E-TYPE-KIND-CHANGED` and `E-TYPE-ABBREVIATION-CHANGED` if the index cache disagrees with config; the cache stores the kind and abbreviation seen at last run). If no document of the type exists, either may be changed freely.
 - Shipped default types are listed in appendix B. `init` writes them into `config.toml`; users edit `config.toml` to add types (this is the one non-Markdown file users edit, and only for configuration).
 - A document's `type` is immutable after creation in v0.1. To change type, supersede with a document of the new type.
 
@@ -251,7 +263,7 @@ CR sidecars are specified in section 9.2, glossary sidecars in section 10.2.
 {
   "schema": 1,
   "uuid": "6f3c2f1e-8b3e-4a4c-9a3d-2d0f5b7a9c11",
-  "id": "RE-7F3K2Q",
+  "id": "RE-STORY-7F3K2Q",
   "type": "user-story",
   "title": "Upload documents to a knowledge base",
   "created": "2026-09-10T14:02:11Z",
@@ -263,8 +275,8 @@ CR sidecars are specified in section 9.2, glossary sidecars in section 10.2.
     { "path": "upload-flow.png", "hash": "sha256:41ab…" }
   ],
   "links": [
-    { "type": "refines", "target": "RE-2K7QMB", "target_version": 4 },
-    { "type": "depends-on", "target": "RE-9PZ0AH", "target_version": 1 }
+    { "type": "refines", "target": "RE-FEAT-2K7QMB", "target_version": 4 },
+    { "type": "depends-on", "target": "RE-CON-9PZ0AH", "target_version": 1 }
   ],
   "deprecated": null,
   "tags": [],
@@ -277,9 +289,9 @@ Field rules:
 
 | Field | Mandatory | Owner | Notes |
 |---|---|---|---|
-| `schema` | yes | tool | Sidecar schema version, currently `1`. |
+| `schema` | yes | tool | Sidecar schema version, currently `1`; independent of `config_schema`. |
 | `uuid` | yes | tool | Immutable. |
-| `id` | yes | tool | Immutable; equals filename stem. |
+| `id` | yes | tool | Immutable typed ID (`<PREFIX>-<ABBREVIATION>-<body>`); equals filename stem. |
 | `type` | yes | tool | Immutable in v0.1. |
 | `title` | yes | tool (from H1) | Synced from the body. |
 | `created` | yes | tool | ISO 8601 UTC, second precision, `Z` suffix. |
@@ -440,10 +452,11 @@ E: high (edit in place; the only extra step is refreshing links after substantiv
 - **Initial-grace period (r0.4, D-AGENT-3).** While an item is at `version == 1` **and** absent from Git `HEAD` (untracked *or* staged-but-uncommitted), reconcile treats an effective content change as *populating the initial version*, not as a change: the recomputed `body_hash`, title (from H1, 5.6) and assets are updated **in place**, the version stays `1`, and the reconcile report classifies the item in the `initialised` bucket (7.5). The state ends when the item first appears in `HEAD`; from then on normal semantics apply (a further content change is an unbumped modification until the next bump). This applies to documents, CRs and glossary terms alike, so the first hook commit of a template-filled document is its real `v1`, and links recorded against the uncommitted `v1` stay fresh (7.4).
 - In degraded mode (no Git) `gregraph sync` performs the bump. **Degraded mode has no grace period**: there is no commit step, so `sync` *is* the versioning act and bumps exactly as before.
 - Versions are never decremented. After a merge conflict in a sidecar, the user resolves the text conflict and runs `gregraph repair versions`, which sets `version = max(versions seen in conflict markers) + 1` and recomputes hashes. v0.1 ships a small parser for the standard conflict-marker layout to extract both `version` values.
+- **Identifier-migration exception (r0.5).** The standalone schema-1 → schema-2 migration (`scripts/migrate_type_ids.py`, `docs/migration-typed-ids.md`) rewrites identifier text in bodies, sidecars, filenames and config. It is an identifier rewrite, not a semantic content change: it preserves every `version`, every link `target_version` and every CR `base_version`, and recomputes `body_hash`/`scope_hash` because the text changed. This is the only case where a stored hash changes without a version bump, and it is performed only by that script, never by `sync`, the hook or any `gregraph` command.
 
 ### 7.3 Content hash
 
-`body_hash = "sha256:" + sha256(normalised_body)` where normalisation is: decode UTF-8, convert CRLF/CR to LF, strip trailing whitespace on every line, collapse three or more consecutive blank lines to two, ensure exactly one trailing newline. The H1 line is included (title changes count).
+`body_hash = "sha256:" + sha256(normalised_body)` where normalisation is: decode UTF-8, convert CRLF/CR to LF, strip trailing whitespace on every line, collapse three or more consecutive blank lines to two, ensure exactly one trailing newline. The H1 line is included (title changes count). The identifier migration (7.2) recomputes this hash after rewriting ID text without bumping `version`.
 
 Asset hashes are SHA-256 of raw bytes. A document's *effective content* changed iff `body_hash` differs or the sorted list of `(path, hash)` differs.
 
@@ -553,17 +566,19 @@ A change request (CR) is a first-class entity **outside the graph**, like the gl
 
 Separating CRs from the graph mirrors configuration-management practice (ISO 10007, EIA-649, the problem and change management of the V-Modell XT): a change record is a process artefact that refers to specific versions of the product description rather than being part of it.
 
+Change requests share the identifier space with documents but use the fixed, reserved abbreviation `CHG` (§4.1): `<PREFIX>-CHG-<6-char body>`, e.g. `RE-CHG-3M9XA1`.
+
 CRs are optional. With `cr.enabled = false`, the `cr` commands and every `--cr` flag refuse with `E-CR-DISABLED`; existing CR files are still validated.
 
 ### 9.2 Files and sidecar
 
-CRs live in `changes/<ID>.md` and `changes/<ID>.json`; the directory is fixed. IDs come from the same generator and the same ID space as documents (section 4). The body is created from the template named in `cr.template` (default `change-request`); the template version is pinned and the body is validated against it exactly like a document body (section 5.5). The H1 rule (5.6) applies. CRs have no assets in v0.1.
+CRs live in `changes/<ID>.md` and `changes/<ID>.json`; the directory is fixed. IDs come from the same generator and the same ID space as documents (section 4), with the fixed `CHG` abbreviation. The body is created from the template named in `cr.template` (default `change-request`); the template version is pinned and the body is validated against it exactly like a document body (section 5.5). The H1 rule (5.6) applies. CRs have no assets in v0.1.
 
 ```json
 {
   "schema": 1,
   "uuid": "0b9e7c1a-3d2f-4e8b-9a61-5c4d2e1f0a77",
-  "id": "RE-3M9XA1",
+  "id": "RE-CHG-3M9XA1",
   "title": "Raise knowledge-base upload limit to 200 MB",
   "created": "2026-09-10T09:00:00Z",
   "created_by": { "name": "Jane Doe", "email": "jane@example.org" },
@@ -572,10 +587,10 @@ CRs live in `changes/<ID>.md` and `changes/<ID>.json`; the directory is fixed. I
   "body_hash": "sha256:…",
   "scope_hash": "sha256:…",
   "scope": [
-    { "id": "RE-7F3K2Q", "intent": "modify", "base_version": 3 },
-    { "id": "RE-9PZ0AH", "intent": "supersede", "base_version": 1 }
+    { "id": "RE-STORY-7F3K2Q", "intent": "modify", "base_version": 3 },
+    { "id": "RE-CON-9PZ0AH", "intent": "supersede", "base_version": 1 }
   ],
-  "introduces": ["RE-Q4M2ZT"],
+  "introduces": ["RE-FEAT-Q4M2ZT"],
   "status": "accepted",
   "decisions": [
     { "status": "open", "at": "2026-09-10T09:00:00Z", "by": { "name": "Jane Doe", "email": "jane@example.org" }, "at_version": 1 },
@@ -589,6 +604,8 @@ CRs live in `changes/<ID>.md` and `changes/<ID>.json`; the directory is fixed. I
 ```
 
 **Content and versioning.** A CR's content is its normalised body **plus its scope**. `scope_hash` is `sha256:` + hex of the canonical JSON of `scope` (sorted by `id`). The CR's `version` is bumped by the same reconcile pass as documents (7.5) whenever `body_hash` or `scope_hash` changes. Excluded from content: `status`, `decisions`, `introduces`, `branch`, `external_ref`, `tags`, `extra`. Status and decisions must be excluded because recording a decision would otherwise change the content the decision refers to. `introduces` must be excluded because implementing a CR would otherwise invalidate its own acceptance.
+
+The identifier migration (7.2) preserves a CR's `version` and every scope entry's `base_version`; it recomputes `body_hash` and `scope_hash` because the rewritten IDs are part of both.
 
 All fields shown are mandatory; lists may be empty; `created_by`, `branch`, `external_ref` are nullable. `scope` is sorted by `id`, `introduces` is sorted. Serialisation is canonical (5.4).
 
@@ -809,6 +826,7 @@ General:
 - Global options: `--repo PATH` (override root discovery), `--no-input` (never prompt; missing required inputs are errors), `--json` (machine-readable output; **every** command and subcommand accepts it — the lifecycle exception is `serve`, which accepts and ignores it, 21.3), `-q/--quiet`, `-v/--verbose`, `--version`.
 - Interactivity: when a required argument is missing and stdin is a TTY and `--no-input` is absent, the command prompts. Every prompt has a flag equivalent. Pickers show a filtered numbered list (ID, type, title, status) and accept a number, an exact ID, or a refined filter string; `q` cancels.
 - Exit codes: `0` success; `1` validation errors or blocked (hook/check); `2` usage error; `3` no repository found / environment error; `4` operation refused (cycle, rule violation, refusal to overwrite); `5` internal error.
+- Config schema (r0.5): every command except `init` requires `config_schema = 2`. A schema-1 config is an environment error (exit 3) whose message names `scripts/migrate_type_ids.py`; the tool does not read, rewrite or partially support schema-1 repositories.
 - Output: plain text, one finding per line, prefixed by code (`E-…`, `W-…`) and the affected ID/path. Colours only when stdout is a TTY and `NO_COLOR` is unset. No third-party terminal library.
 - **`--json` contract (r0.4, D-AGENT-2).** With `--json` a command writes **exactly one canonical JSON document** (5.4 serialisation) to stdout and terminates; nothing else is written to stdout, and **stderr is empty** for exit codes 0–4 (and for 5 unless the `GREGRAPH_DEBUG=1` debugging escape hatch sends the traceback to stderr). Warnings and degraded-mode notes that human mode writes to stderr travel inside the payload as `notices: [string]`; non-fatal findings as `findings: [Finding]` (14). `--json` takes precedence over `--quiet`: `--json --quiet` still prints the JSON document; `--quiet` suppresses human output only. `--edit` (spawn `$VISUAL`/`$EDITOR`) and `--json` are mutually exclusive — an interactive editor cannot be part of a machine-readable call (usage error, exit 2). `--help`/`-h`/`--version` remain plain text (exit 0); `gregraph` with no command prints help and exits 2, which under `--json` becomes an `E-USAGE` envelope with the help text in `details.usage`.
 - **Error envelope (r0.4).** Exit-1 documents are **result-shaped**, not error envelopes (exit 1 means the operation ran and reports findings): `validate --json` is the §14 findings array; `check --json` and `hook pre-commit --json` their check payloads (13.8). Exit 2/3/4/5 produce one **error envelope** on stdout, `{"error": {code, exit_code, message, finding, details}}`, where `code` is `E-USAGE` (exit 2; `details` carries the argparse usage string when available), `E-NO-REPOSITORY` when root discovery fails or `E-ENV` otherwise (exit 3), the refusal's finding code such as `E-CYCLE` or `E-SECTION-UNKNOWN` (exit 4; `finding` is the complete `Finding` including `details`, `details` mirrors `finding.details`), or `E-INTERNAL` (exit 5). Human mode is unchanged (plain text on stderr).
@@ -918,7 +936,7 @@ Without content flags: opens the Markdown in `$VISUAL`/`$EDITOR`. Convenience on
 (r0.4, D-AGENT-4) With content flags the edit is performed by the tool instead of an editor: `--body`/`--body-file` replace the whole body through the `update_body` path (21.5, `base_hash` computed from the on-disk body immediately before writing — `E-BODY-STALE` on mismatch); `--section`/`--section-file` assemble per-section content through `update_sections`, preserving unmentioned sections verbatim (extra level-2 sections not in the template stay at the end, 5.2/D12); `--strict` refuses when a required section is empty or placeholder-only after assembly. `edit` has no `--title` flag: on `--body`/`--body-file` a level-1 `# Heading` in the supplied text is the title authority — the sidecar `title` is synchronised to it (`update_body` step 5 of 21.5; AGENT_READINESS §3.4 rule 8) — while supplied text without a level-1 heading gets the existing document title prepended as `# <title>` (the tool owns the H1, 13.2). On `--section`/`--section-file` the required-section check runs on the assembled body: unmentioned required sections that are already filled on disk are preserved verbatim (AGENT-016), and only required sections that are empty or placeholder-only after assembly trigger `E-SECTION-REQUIRED-EMPTY`. Heading matching, precedence, stdin rules and refusals as in 13.2; nothing is written on refusal. `edit --json` without any content flag is a usage error (exit 2) — an interactive editor cannot be part of a machine-readable call.
 
 ### 13.24 `schema`
-`gregraph schema [--type TYPE] [--json]` (r0.4, D-AGENT-5) — the repository rulebook in one call, so agents never read `config.toml` or template files: config policies (`id_prefix`, `baseline_branch`, `versioning`, `graph`, `assets`, `cr`), the configured `types` (kind, folder, template, informational id prefix, template description), the five kinds, the nine edge rules (direction, hierarchical, acyclic, source/target kind sets, `same_kind_only`, mutual exclusions, and the 6.1 guidance as each rule's description), the active `templates` (latest non-deprecated version, all version numbers, `sections` with `required`/`placeholder`/`renamed_from`), and the `cr_lifecycle` (statuses, transitions, scope intents). `--type TYPE` filters `types` to that type and `templates` to those its entries reference (plus the CR template when CRs are enabled); the global sections (`kinds`, `edge_rules`, `cr_lifecycle`, policies) stay. Unknown `--type` refuses `E-TYPE-UNKNOWN`. Human mode prints aligned tables mirroring the payload.
+`gregraph schema [--type TYPE] [--json]` (r0.4, D-AGENT-5; amended r0.5) — the repository rulebook in one call, so agents never read `config.toml` or template files: the payload's `schema` (the config schema, currently `2`), config policies (`id_prefix`, `baseline_branch`, `versioning`, `graph`, `assets`, `cr`), the configured `types` (kind, `abbreviation`, folder, template, informational id prefix, template description), `cr_abbreviation` (`CHG`), the five kinds, the nine edge rules (direction, hierarchical, acyclic, source/target kind sets, `same_kind_only`, mutual exclusions, and the 6.1 guidance as each rule's description), the active `templates` (latest non-deprecated version, all version numbers, `sections` with `required`/`placeholder`/`renamed_from`), and the `cr_lifecycle` (statuses, transitions, scope intents). `--type TYPE` filters `types` to that type and `templates` to those its entries reference (plus the CR template when CRs are enabled); the global sections (`kinds`, `edge_rules`, `cr_lifecycle`, policies) stay. Unknown `--type` refuses `E-TYPE-UNKNOWN`. Human mode prints aligned tables mirroring the payload.
 
 ### 13.25 `context`
 `gregraph context <ID…> [--depth N] [--direction both|upstream|downstream] [--include-terms|--no-include-terms] [--json]` (r0.4, D-AGENT-8) — one call packing the reading context for the requested documents and CRs (mixed allowed; an unknown ID refuses `E-ID-UNKNOWN` naming the offender; `--depth` defaults to 1, `N ≥ 0`):
@@ -942,11 +960,13 @@ Severity **E** = error (exit 1; blocks hook), **W** = warning.
 | `E-BODY-MISSING` | E | `.json` without `.md`. |
 | `E-SIDECAR-INVALID` | E | JSON unparsable or fails schema. |
 | `E-ID-FILENAME` | E | `id` ≠ filename stem. |
-| `E-ID-DERIVATION` | E | `id` not derivable from `uuid` with the configured prefix. |
+| `E-ID-DERIVATION` | E | `id` not derivable from `uuid` with the configured prefix and the abbreviation of the document's type (`CHG` for a CR). |
+| `E-ID-LEGACY` | E | (r0.5) A document or change-request sidecar/filename still uses a two-segment ID. Old IDs are invalid; run `scripts/migrate_type_ids.py` before upgrading. Stale references elsewhere surface as the normal link/mention/scope errors. |
 | `E-ID-DUPLICATE` | E | Two documents with the same `id`. |
 | `E-UUID-DUPLICATE` | E | Two documents with the same `uuid`. |
 | `E-TYPE-UNKNOWN` | E | `type` not in config. |
 | `E-TYPE-KIND-CHANGED` | E | Type's kind changed while documents exist. |
+| `E-TYPE-ABBREVIATION-CHANGED` | E | (r0.5) Type's abbreviation changed while documents of that type exist. |
 | `E-TITLE-MISSING` | E | No H1 as first non-blank line. |
 | `E-FRONTMATTER-FORBIDDEN` | E | Body starts with `---`. |
 | `E-TEMPLATE-UNKNOWN` | E | Pinned template name/version not in repository. |
@@ -1001,7 +1021,7 @@ Severity **E** = error (exit 1; blocks hook), **W** = warning.
 ## 15. Mermaid export
 
 - Output: a fenced ` ```mermaid ` block containing `flowchart TD` (or `LR`).
-- Node id in Mermaid: the document ID with `-` removed (Mermaid dislikes hyphens in some contexts): `RE7F3K2Q`. Label: `RE-7F3K2Q<br/>Title truncated to 40 chars`, with Mermaid-escaping of quotes.
+- Node id in Mermaid: the document ID with `-` removed (Mermaid dislikes hyphens in some contexts): `RESTORY7F3K2Q`. Label: `RE-STORY-7F3K2Q<br/>Title truncated to 40 chars`, with Mermaid-escaping of quotes.
 - Node shape by kind: goal `([…])` stadium; requirement `[…]` rectangle; design `[[…]]` subroutine; verification `{{…}}` hexagon; information `>…]` flag.
 - Edge style by type: `refines` solid arrow `-->`; `derives-from` dotted `-.->`; `depends-on` thick `==>`; `satisfies`, `verifies`, `constrains` solid with label `-- verifies -->`; `supersedes` dotted with label; `conflicts-with` and `relates-to` undirected `---` with label (conflicts drawn in red via `linkStyle`).
 - Deprecated/superseded nodes (when included) get a `classDef` with dashed border.
@@ -1018,6 +1038,8 @@ The repository holds two distributions (§16.4) under `packages/`. Both install 
 
 ```
 pyproject.toml                     # tooling only (no [project]): dev dependency group, ruff/mypy/pytest config
+scripts/
+└── migrate_type_ids.py            # standalone schema-1 → schema-2 ID migration (does not import gregraph)
 packages/
 ├── core/                          # distribution gregraph-core (pyproject.toml, hatchling)
 │   └── src/gregraph/
@@ -1026,7 +1048,7 @@ packages/
 │       │   ├── __init__.py
 │       │   ├── workspace.py       # Workspace: root discovery, config, index, git adapter, entry point for all operations
 │       │   ├── config.py          # config.toml model (pydantic), defaults, type definitions
-│       │   ├── ids.py             # UUID → ID, prefix rules, parsing
+│       │   ├── ids.py             # UUID → typed ID, prefix/abbreviation rules, parsing
 │       │   ├── models.py          # pydantic models: Document, Link, ChangeRequest, ScopeEntry, Decision, Term, TemplateDescriptor, Identity, Finding
 │       │   ├── storage.py         # file I/O: paths, canonical JSON, reading/writing documents, terms, cache
 │       │   ├── markdown.py        # body normalisation, H1 extraction, section parsing, mention detection, asset refs (markdown-it-py)
@@ -1083,7 +1105,7 @@ Development: `pytest`, `pytest-cov`, `hypothesis`, `ruff`, `mypy`, `pre-commit`,
 
 ### 16.4 Packaging
 
-The product ships as two distributions built from `packages/` and released in lockstep (same version number at every release; currently `0.1.1`). The original single-distribution packaging (`gregraph` with one `pyproject.toml` at the root) is superseded; the reason is recorded in `docs/decisions.md` (D-PACKAGE-SPLIT).
+The product ships as two distributions built from `packages/` and released in lockstep (same version number at every release; currently `0.2.0`). The original single-distribution packaging (`gregraph` with one `pyproject.toml` at the root) is superseded; the reason is recorded in `docs/decisions.md` (D-PACKAGE-SPLIT).
 
 | Distribution | Source | Provides | Runtime dependencies |
 |---|---|---|---|
@@ -1101,11 +1123,11 @@ The product ships as two distributions built from `packages/` and released in lo
 - The root `pyproject.toml` is tooling-only. It has no `[project]` table, so there is no root distribution and no root installation (`pip install .` at the root is unsupported). It carries the `dev` dependency group (`pytest`, `pytest-cov`, `hypothesis`, `ruff`, `mypy`, `pre-commit`, `hatchling`), the ruff, mypy and pytest configuration, and `mypy_path` covering both source roots, so the quality gate runs as `mypy --strict -p gregraph`.
 - Quality gate (before every commit): `ruff check . && ruff format --check . && mypy --strict -p gregraph && pytest`.
 - Package data: `packages/core` must include `builtin_templates/**`.
-- Semantic versioning. `0.1.0` was the first release.
+- Semantic versioning. `0.1.0` was the first release; `0.2.0` introduces typed identifiers and config schema 2. The migration script under `scripts/` is repository tooling, not a distribution and not installed as a console script.
 
 ### 16.5 Cache
 
-`.gregraph/cache/index.json`: `{ "schema": 1, "tool_version": "…", "files": { "<relpath>": { "mtime_ns": …, "size": …, "body_hash": "…" } }, "types_seen": { "<type>": "<kind>" }, "templates_seen": { "<name>/v<N>": "<sections-hash>" } }`. Used to skip re-hashing unchanged Markdown and to detect type-kind and template mutations. Absence or corruption → rebuild silently.
+`.gregraph/cache/index.json`: `{ "schema": 1, "tool_version": "…", "files": { "<relpath>": { "mtime_ns": …, "size": …, "body_hash": "…" } }, "types_seen": { "<type>": "<kind>" }, "abbreviations_seen": { "<type>": "<abbreviation>" }, "templates_seen": { "<name>/v<N>": "<sections-hash>" } }`. Used to skip re-hashing unchanged Markdown and to detect type-kind/abbreviation and template mutations. Absence or corruption → rebuild silently.
 
 ### 16.6 Performance notes
 
@@ -1187,6 +1209,7 @@ Appendix A is deliberately kept in plain Markdown so that an agent can read it w
 | D17 | Decision authority = merge into the baseline branch; proposed vs. effective status is shown, not warned; `cr.deciders` is advisory. | 9.3 |
 | D18 | Origin tracking as metadata (`origin_cr` / `introduces`), not edges. | 9.5 |
 | D19 | Both CR workflows (proposal-first, single-PR) supported, none enforced; CRs optional via `cr.enabled`. | 9.9 |
+| D20 | Typed IDs: `<PREFIX>-<ABBREVIATION>-<body>`, one required unique abbreviation per type, fixed reserved `CHG` for CRs; config schema 2 with a hard cutover and no aliases; standalone migration script; abbreviations immutable once used. (D-TYPED-IDS) | 4, 5.3, 7.2, 14 |
 
 Known open items for v0.2: web UI (read/edit/commit), history/diff between refs and baselines, merge driver, exports, query language, sentence linting, user-defined edge types, per-type typed `extra` fields, CR overlay in graph export, CR verification state, `undeprecate` scope intent.
 
@@ -1213,7 +1236,7 @@ Known open items for v0.2: web UI (read/edit/commit), history/diff between refs 
 
 ### 21.2 Distributions and installation
 
-- A third distribution, `gregraph-webui`, is built from `packages/webui` (hatchling, `src/` layout, `requires-python >=3.12`), version **0.1.1**, released in lockstep with `gregraph-core` and `gregraph-cli`.
+- A third distribution, `gregraph-webui`, is built from `packages/webui` (hatchling, `src/` layout, `requires-python >=3.12`), version **0.2.0**, released in lockstep with `gregraph-core` and `gregraph-cli`.
 - Its runtime dependencies are `gregraph-core==<same version>`, `gregraph-cli==<same version>`, `fastapi` and `uvicorn` (minimum versions pinned in `packages/webui/pyproject.toml`). It is the only distribution that depends on FastAPI or uvicorn.
 - `gregraph-core` and `gregraph-cli` keep their runtime dependencies unchanged (16.3, BOOT-201). Without `gregraph-webui`, nothing about them changes.
 - It contributes files only under `gregraph/webui/` (the shared `gregraph` namespace of 16.4 applies). The compiled frontend is shipped inside the wheel under `gregraph/webui/static/`. Installing it needs no Node.js.
@@ -1272,7 +1295,7 @@ Core operation, one function in `operations.py` with keyword arguments and a res
 5. **Title sync.** When the text has a level-1 heading, the sidecar `title` is synchronised to it (5.6). No other sidecar field changes: `version`, `body_hash`, `assets`, `links`, `tags`, `deprecated` and `origin_cr` are untouched. A saved change is therefore visible as "modified, unbumped" in `status` until the hook or `sync --bump` runs. Git workflows are unchanged.
 6. **Path safety.** Both the Markdown file and its sidecar are resolved with `managed_path` before any read or write. Each path component below the repository root, including the file and every folder above it, must be a real file or directory: a symbolic link, or on Windows a junction, is refused, and so is a relative path that would leave the repository. The refusal is `E-PATH-UNSAFE` (21.8), with the offending repository-relative path as subject. Nothing is written in that case.
 7. **Write order and atomicity.**
-   - The **body** is written by the storage helper `write_body_atomic`. It creates a temporary file `<filename>.<32 hex digits>.tmp` in the same directory (for example `RE-7F3K2Q.md.<hex>.tmp`), opened exclusively, so that no managed scan of `.md` or `.json` files sees it. It writes the LF-only UTF-8 bytes, flushes and syncs them to disk, copies the target's permission bits onto it, and then replaces the Markdown file with `os.replace`. If any step fails, the temporary file is removed and the original file keeps its previous bytes. Access-control lists and extended attributes are **not** preserved; only the mode bits are.
+   - The **body** is written by the storage helper `write_body_atomic`. It creates a temporary file `<filename>.<32 hex digits>.tmp` in the same directory (for example `RE-STORY-7F3K2Q.md.<hex>.tmp`), opened exclusively, so that no managed scan of `.md` or `.json` files sees it. It writes the LF-only UTF-8 bytes, flushes and syncs them to disk, copies the target's permission bits onto it, and then replaces the Markdown file with `os.replace`. If any step fails, the temporary file is removed and the original file keeps its previous bytes. Access-control lists and extended attributes are **not** preserved; only the mode bits are.
    - The **sidecar title** update, when needed, is a separate canonical rewrite. It is **not** atomic, and it is not atomic with the body write. A crash between the two writes can leave the title out of sync until the next sync or save corrects it (5.6). A crash during the sidecar write itself can leave a truncated sidecar, which `validate` reports as `E-SIDECAR-INVALID` and which must then be repaired by hand.
 8. The result carries the new normalised body hash, which the client uses as the `base_hash` of its next save; the `changed` flag; and the findings of step 3. `update_body` does not recompute asset references; reconcile (7.5) does.
 
@@ -1425,8 +1448,8 @@ Format per item: provisional key; type; kind; statement in EARS form; refines/co
 
 ```toml
 [gregraph]
-config_schema = 1
-tool_version = "0.1.0"
+config_schema = 2
+tool_version = "0.2.0"
 
 [ids]
 prefix = "RE"
@@ -1446,60 +1469,74 @@ max_size_kb = 5120
 
 [types.context]
 kind = "goal"
+abbreviation = "CTX"
 template = "context"
 
 [types.goal]
 kind = "goal"
+abbreviation = "GOAL"
 template = "goal"
 
 [types.epic]
 kind = "goal"
+abbreviation = "EPIC"
 template = "epic"
 
 [types.feature]
 kind = "requirement"
+abbreviation = "FEAT"
 template = "feature"
 
 [types.user-story]
 kind = "requirement"
+abbreviation = "STORY"
 template = "user-story"
 
 [types.functional-requirement]
 kind = "requirement"
+abbreviation = "FUNC"
 template = "requirement-ears"
 
 [types.non-functional-requirement]
 kind = "requirement"
+abbreviation = "NFR"
 template = "requirement-ears"
 
 [types.constraint]
 kind = "requirement"
+abbreviation = "CON"
 template = "constraint"
 
 [types.design]
 kind = "design"
+abbreviation = "DSGN"
 template = "design"
 
 [types.decision]
 kind = "design"
+abbreviation = "DEC"
 template = "decision"
 
 [types.test-case]
 kind = "verification"
+abbreviation = "TEST"
 template = "test-case"
 
 [types.stakeholder]
 kind = "information"
+abbreviation = "STKH"
 template = "stakeholder"
 
 [types.assumption]
 kind = "information"
+abbreviation = "ASM"
 template = "assumption"
 
 [cr]
 enabled = true
 template = "change-request"
 deciders = []                 # optional list of e-mail addresses; empty = no check
+# CRs always use the fixed, reserved abbreviation CHG; it is not configurable.
 ```
 
 CRs always live in `<root>/changes/`; the directory is not configurable.
@@ -1545,7 +1582,7 @@ class Link(BaseModel):
         "conflicts-with",
         "relates-to",
     ]
-    target: str  # ID
+    target: str  # typed ID: <PREFIX>-<ABBREVIATION>-<body>
     target_version: int  # >= 1
 
 

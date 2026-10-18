@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 
 def test_mermaid_id_strips_hyphens() -> None:
-    assert mermaid_id("RE-7F3K2Q") == "RE7F3K2Q"
+    assert mermaid_id("RE-FEAT-7F3K2Q") == "REFEAT7F3K2Q"
 
 
 def test_escape_label_escapes_quotes_and_hashes() -> None:
@@ -38,23 +38,23 @@ def test_escape_label_escapes_quotes_and_hashes() -> None:
 
 
 def test_node_label_truncates_title_to_40_chars() -> None:
-    assert node_label("RE-111111", "X" * 50) == "RE-111111<br/>" + "X" * 40
-    assert node_label("RE-111111", "short") == "RE-111111<br/>short"
+    assert node_label("RE-FEAT-111111", "X" * 50) == "RE-FEAT-111111<br/>" + "X" * 40
+    assert node_label("RE-FEAT-111111", "short") == "RE-FEAT-111111<br/>short"
 
 
 def test_node_label_escapes_quotes_in_title() -> None:
     assert (
-        node_label("RE-111111", 'Say "hello" #1')
-        == "RE-111111<br/>Say #quot;hello#quot; #35;1"
+        node_label("RE-FEAT-111111", 'Say "hello" #1')
+        == "RE-FEAT-111111<br/>Say #quot;hello#quot; #35;1"
     )
 
 
 GOLDEN_ESCAPING = """\
 ```mermaid
 flowchart TD
-RE111111["RE-111111<br/>Say #quot;hello#quot; #35;1"]
-RE222222(["RE-222222<br/>A #quot;quoted#quot; goal"])
-RE111111 ==> RE222222
+REFEAT111111["RE-FEAT-111111<br/>Say #quot;hello#quot; #35;1"]
+REFEAT222222(["RE-FEAT-222222<br/>A #quot;quoted#quot; goal"])
+REFEAT111111 ==> REFEAT222222
 ```
 """
 
@@ -65,19 +65,19 @@ def test_escaping_golden() -> None:
     graph = Graph(
         [
             Node(
-                id="RE-111111",
+                id="RE-FEAT-111111",
                 kind="requirement",
                 title='Say "hello" #1',
                 deprecated=False,
             ),
             Node(
-                id="RE-222222",
+                id="RE-FEAT-222222",
                 kind="goal",
                 title='A "quoted" goal',
                 deprecated=False,
             ),
         ],
-        [Edge(source="RE-111111", type="depends-on", target="RE-222222")],
+        [Edge(source="RE-FEAT-111111", type="depends-on", target="RE-FEAT-222222")],
     )
     export = export_mermaid(graph)
     assert export.diagram == GOLDEN_ESCAPING
@@ -87,39 +87,39 @@ def test_escaping_golden() -> None:
 @pytest.mark.parametrize(
     ("kind", "expected"),
     [
-        ("goal", 'RE111111(["RE-111111<br/>Title"])'),
-        ("requirement", 'RE111111["RE-111111<br/>Title"]'),
-        ("design", 'RE111111[["RE-111111<br/>Title"]]'),
-        ("verification", 'RE111111{{"RE-111111<br/>Title"}}'),
-        ("information", 'RE111111>"RE-111111<br/>Title"]'),
+        ("goal", 'REFEAT111111(["RE-FEAT-111111<br/>Title"])'),
+        ("requirement", 'REFEAT111111["RE-FEAT-111111<br/>Title"]'),
+        ("design", 'REFEAT111111[["RE-FEAT-111111<br/>Title"]]'),
+        ("verification", 'REFEAT111111{{"RE-FEAT-111111<br/>Title"}}'),
+        ("information", 'REFEAT111111>"RE-FEAT-111111<br/>Title"]'),
     ],
 )
 def test_node_shapes_by_kind(kind: Kind, expected: str) -> None:
-    node = Node(id="RE-111111", kind=kind, title="Title", deprecated=False)
+    node = Node(id="RE-FEAT-111111", kind=kind, title="Title", deprecated=False)
     assert render_node(node) == expected
 
 
 def test_unknown_kind_falls_back_to_rectangle() -> None:
-    node = Node(id="RE-111111", kind=None, title="Title", deprecated=False)
-    assert render_node(node) == 'RE111111["RE-111111<br/>Title"]'
+    node = Node(id="RE-FEAT-111111", kind=None, title="Title", deprecated=False)
+    assert render_node(node) == 'REFEAT111111["RE-FEAT-111111<br/>Title"]'
 
 
 @pytest.mark.parametrize(
     ("edge_type", "expected"),
     [
-        ("refines", "RE111111 --> RE222222"),
-        ("derives-from", "RE111111 -.-> RE222222"),
-        ("depends-on", "RE111111 ==> RE222222"),
-        ("satisfies", "RE111111 -- satisfies --> RE222222"),
-        ("verifies", "RE111111 -- verifies --> RE222222"),
-        ("constrains", "RE111111 -- constrains --> RE222222"),
-        ("supersedes", "RE111111 -. supersedes .-> RE222222"),
-        ("conflicts-with", "RE111111 -- conflicts-with --- RE222222"),
-        ("relates-to", "RE111111 -- relates-to --- RE222222"),
+        ("refines", "REFEAT111111 --> REFEAT222222"),
+        ("derives-from", "REFEAT111111 -.-> REFEAT222222"),
+        ("depends-on", "REFEAT111111 ==> REFEAT222222"),
+        ("satisfies", "REFEAT111111 -- satisfies --> REFEAT222222"),
+        ("verifies", "REFEAT111111 -- verifies --> REFEAT222222"),
+        ("constrains", "REFEAT111111 -- constrains --> REFEAT222222"),
+        ("supersedes", "REFEAT111111 -. supersedes .-> REFEAT222222"),
+        ("conflicts-with", "REFEAT111111 -- conflicts-with --- REFEAT222222"),
+        ("relates-to", "REFEAT111111 -- relates-to --- REFEAT222222"),
     ],
 )
 def test_edge_styles_by_type(edge_type: LinkType, expected: str) -> None:
-    edge = Edge(source="RE-111111", type=edge_type, target="RE-222222")
+    edge = Edge(source="RE-FEAT-111111", type=edge_type, target="RE-FEAT-222222")
     assert render_edge(edge) == expected
 
 
@@ -132,30 +132,30 @@ def test_empty_graph_is_header_only() -> None:
 GOLDEN_DEFAULT = """\
 ```mermaid
 flowchart TD
-RE000001(["RE-000001<br/>Increase self-service"])
-RE000002(["RE-000002<br/>Meet GDPR"])
-RE000003(["RE-000003<br/>Knowledge base"])
-RE000004["RE-000004<br/>Upload documents"]
-RE000005["RE-000005<br/>Upload from the desktop"]
-RE000007["RE-000007<br/>Scan uploads for malware"]
-RE000008["RE-000008<br/>Pipeline rejects infected files"]
-RE000009["RE-000009<br/>P95 upload latency under 3 s"]
-RE00000A[["RE-00000A<br/>Ingestion pipeline"]]
-RE00000B{{"RE-00000B<br/>Upload happy path"}}
-RE00000C>"RE-00000C<br/>Anna the compliance officer"]
-RE00000D>"RE-00000D<br/>Users have modern browsers"]
-RE000002 -- conflicts-with --- RE00000A
-RE000003 --> RE000001
-RE000004 --> RE000003
-RE000005 --> RE000004
-RE000007 -.-> RE000004
-RE000008 ==> RE000005
-RE000008 --> RE000007
-RE000009 -- constrains --> RE000004
-RE00000A -- satisfies --> RE000004
-RE00000B -- verifies --> RE000005
-RE00000B -- verifies --> RE00000A
-linkStyle 0 stroke:#ff0000
+REASM00000D>"RE-ASM-00000D<br/>Users have modern browsers"]
+REDSGN00000A[["RE-DSGN-00000A<br/>Ingestion pipeline"]]
+REEPIC000003(["RE-EPIC-000003<br/>Knowledge base"])
+REFEAT000004["RE-FEAT-000004<br/>Upload documents"]
+REFUNC000008["RE-FUNC-000008<br/>Pipeline rejects infected files"]
+REGOAL000001(["RE-GOAL-000001<br/>Increase self-service"])
+REGOAL000002(["RE-GOAL-000002<br/>Meet GDPR"])
+RENFR000009["RE-NFR-000009<br/>P95 upload latency under 3 s"]
+RESTKH00000C>"RE-STKH-00000C<br/>Anna the compliance officer"]
+RESTORY000005["RE-STORY-000005<br/>Upload from the desktop"]
+RESTORY000007["RE-STORY-000007<br/>Scan uploads for malware"]
+RETEST00000B{{"RE-TEST-00000B<br/>Upload happy path"}}
+REDSGN00000A -- satisfies --> REFEAT000004
+REEPIC000003 --> REGOAL000001
+REFEAT000004 --> REEPIC000003
+REFUNC000008 ==> RESTORY000005
+REFUNC000008 --> RESTORY000007
+REGOAL000002 -- conflicts-with --- REDSGN00000A
+RENFR000009 -- constrains --> REFEAT000004
+RESTORY000005 --> REFEAT000004
+RESTORY000007 -.-> REFEAT000004
+RETEST00000B -- verifies --> REDSGN00000A
+RETEST00000B -- verifies --> RESTORY000005
+linkStyle 5 stroke:#ff0000
 ```
 """
 
@@ -171,35 +171,35 @@ def test_default_scope_golden(sample_graph: SampleGraph) -> None:
 GOLDEN_INCLUDE_SUPERSEDED = """\
 ```mermaid
 flowchart TD
-RE000001(["RE-000001<br/>Increase self-service"])
-RE000002(["RE-000002<br/>Meet GDPR"])
-RE000003(["RE-000003<br/>Knowledge base"])
-RE000004["RE-000004<br/>Upload documents"]
-RE000005["RE-000005<br/>Upload from the desktop"]
-RE000006["RE-000006<br/>Upload from the desktop (old)"]
-RE000007["RE-000007<br/>Scan uploads for malware"]
-RE000008["RE-000008<br/>Pipeline rejects infected files"]
-RE000009["RE-000009<br/>P95 upload latency under 3 s"]
-RE00000A[["RE-00000A<br/>Ingestion pipeline"]]
-RE00000B{{"RE-00000B<br/>Upload happy path"}}
-RE00000C>"RE-00000C<br/>Anna the compliance officer"]
-RE00000D>"RE-00000D<br/>Users have modern browsers"]
-RE00000E>"RE-00000E<br/>English-only is enough"]
-RE000002 -- conflicts-with --- RE00000A
-RE000003 --> RE000001
-RE000004 --> RE000003
-RE000005 --> RE000004
-RE000005 -. supersedes .-> RE000006
-RE000007 -.-> RE000004
-RE000008 ==> RE000005
-RE000008 --> RE000007
-RE000009 -- constrains --> RE000004
-RE00000A -- satisfies --> RE000004
-RE00000B -- verifies --> RE000005
-RE00000B -- verifies --> RE00000A
-linkStyle 0 stroke:#ff0000
+REASM00000D>"RE-ASM-00000D<br/>Users have modern browsers"]
+REASM00000E>"RE-ASM-00000E<br/>English-only is enough"]
+REDSGN00000A[["RE-DSGN-00000A<br/>Ingestion pipeline"]]
+REEPIC000003(["RE-EPIC-000003<br/>Knowledge base"])
+REFEAT000004["RE-FEAT-000004<br/>Upload documents"]
+REFUNC000008["RE-FUNC-000008<br/>Pipeline rejects infected files"]
+REGOAL000001(["RE-GOAL-000001<br/>Increase self-service"])
+REGOAL000002(["RE-GOAL-000002<br/>Meet GDPR"])
+RENFR000009["RE-NFR-000009<br/>P95 upload latency under 3 s"]
+RESTKH00000C>"RE-STKH-00000C<br/>Anna the compliance officer"]
+RESTORY000005["RE-STORY-000005<br/>Upload from the desktop"]
+RESTORY000006["RE-STORY-000006<br/>Upload from the desktop (old)"]
+RESTORY000007["RE-STORY-000007<br/>Scan uploads for malware"]
+RETEST00000B{{"RE-TEST-00000B<br/>Upload happy path"}}
+REDSGN00000A -- satisfies --> REFEAT000004
+REEPIC000003 --> REGOAL000001
+REFEAT000004 --> REEPIC000003
+REFUNC000008 ==> RESTORY000005
+REFUNC000008 --> RESTORY000007
+REGOAL000002 -- conflicts-with --- REDSGN00000A
+RENFR000009 -- constrains --> REFEAT000004
+RESTORY000005 --> REFEAT000004
+RESTORY000005 -. supersedes .-> RESTORY000006
+RESTORY000007 -.-> REFEAT000004
+RETEST00000B -- verifies --> REDSGN00000A
+RETEST00000B -- verifies --> RESTORY000005
+linkStyle 5 stroke:#ff0000
 classDef stale stroke-dasharray: 5 5
-class RE000006,RE00000E stale
+class REASM00000E,RESTORY000006 stale
 ```
 """
 
@@ -214,25 +214,25 @@ def test_include_superseded_golden(sample_graph: SampleGraph) -> None:
 GOLDEN_ROOT_SUBGRAPH = """\
 ```mermaid
 flowchart TD
-RE000001(["RE-000001<br/>Increase self-service"])
-RE000003(["RE-000003<br/>Knowledge base"])
-RE000004["RE-000004<br/>Upload documents"]
-RE000005["RE-000005<br/>Upload from the desktop"]
-RE000007["RE-000007<br/>Scan uploads for malware"]
-RE000008["RE-000008<br/>Pipeline rejects infected files"]
-RE000009["RE-000009<br/>P95 upload latency under 3 s"]
-RE00000A[["RE-00000A<br/>Ingestion pipeline"]]
-RE00000B{{"RE-00000B<br/>Upload happy path"}}
-RE000003 --> RE000001
-RE000004 --> RE000003
-RE000005 --> RE000004
-RE000007 -.-> RE000004
-RE000008 ==> RE000005
-RE000008 --> RE000007
-RE000009 -- constrains --> RE000004
-RE00000A -- satisfies --> RE000004
-RE00000B -- verifies --> RE000005
-RE00000B -- verifies --> RE00000A
+REDSGN00000A[["RE-DSGN-00000A<br/>Ingestion pipeline"]]
+REEPIC000003(["RE-EPIC-000003<br/>Knowledge base"])
+REFEAT000004["RE-FEAT-000004<br/>Upload documents"]
+REFUNC000008["RE-FUNC-000008<br/>Pipeline rejects infected files"]
+REGOAL000001(["RE-GOAL-000001<br/>Increase self-service"])
+RENFR000009["RE-NFR-000009<br/>P95 upload latency under 3 s"]
+RESTORY000005["RE-STORY-000005<br/>Upload from the desktop"]
+RESTORY000007["RE-STORY-000007<br/>Scan uploads for malware"]
+RETEST00000B{{"RE-TEST-00000B<br/>Upload happy path"}}
+REDSGN00000A -- satisfies --> REFEAT000004
+REEPIC000003 --> REGOAL000001
+REFEAT000004 --> REEPIC000003
+REFUNC000008 ==> RESTORY000005
+REFUNC000008 --> RESTORY000007
+RENFR000009 -- constrains --> REFEAT000004
+RESTORY000005 --> REFEAT000004
+RESTORY000007 -.-> REFEAT000004
+RETEST00000B -- verifies --> REDSGN00000A
+RETEST00000B -- verifies --> RESTORY000005
 ```
 """
 
@@ -249,9 +249,9 @@ def test_root_subgraph_golden(sample_graph: SampleGraph) -> None:
 GOLDEN_ROOT_DEPTH_ONE = """\
 ```mermaid
 flowchart TD
-RE000001(["RE-000001<br/>Increase self-service"])
-RE000003(["RE-000003<br/>Knowledge base"])
-RE000003 --> RE000001
+REEPIC000003(["RE-EPIC-000003<br/>Knowledge base"])
+REGOAL000001(["RE-GOAL-000001<br/>Increase self-service"])
+REEPIC000003 --> REGOAL000001
 ```
 """
 
@@ -282,13 +282,13 @@ def test_relates_to_is_drawn_undirected_when_in_scope(
     """``relates-to`` is outside the §13.13 default edge scope but must render
     as an undirected labelled ``---`` when requested (§15)."""
     export = export_mermaid(sample_graph.graph, edge_types=frozenset(EDGE_RULES))
-    assert "RE00000C -- relates-to --- RE000001" in export.diagram.splitlines()
+    assert "RESTKH00000C -- relates-to --- REGOAL000001" in export.diagram.splitlines()
     assert export.findings == ()
 
 
 def test_unknown_root_raises(sample_graph: SampleGraph) -> None:
     with pytest.raises(ValueError, match="unknown root"):
-        export_mermaid(sample_graph.graph, roots=("RE-999999",))
+        export_mermaid(sample_graph.graph, roots=("RE-FEAT-999999",))
 
 
 def test_depth_without_roots_is_ignored(sample_graph: SampleGraph) -> None:
@@ -299,11 +299,15 @@ def test_depth_without_roots_is_ignored(sample_graph: SampleGraph) -> None:
 
 def test_link_style_marks_every_conflict_edge() -> None:
     graph = Graph(
-        [node("RE-111111"), node("RE-222222"), node("RE-333333")],
+        [node("RE-FEAT-111111"), node("RE-FEAT-222222"), node("RE-FEAT-333333")],
         [
-            Edge(source="RE-111111", type="conflicts-with", target="RE-222222"),
-            Edge(source="RE-111111", type="refines", target="RE-222222"),
-            Edge(source="RE-222222", type="conflicts-with", target="RE-333333"),
+            Edge(
+                source="RE-FEAT-111111", type="conflicts-with", target="RE-FEAT-222222"
+            ),
+            Edge(source="RE-FEAT-111111", type="refines", target="RE-FEAT-222222"),
+            Edge(
+                source="RE-FEAT-222222", type="conflicts-with", target="RE-FEAT-333333"
+            ),
         ],
     )
     export = export_mermaid(graph)
@@ -312,19 +316,19 @@ def test_link_style_marks_every_conflict_edge() -> None:
 
 
 def test_classdef_only_when_stale_nodes_included() -> None:
-    stale = Node(id="RE-111111", kind="requirement", title="Old", deprecated=True)
-    live = Node(id="RE-222222", kind="requirement", title="New", deprecated=False)
+    stale = Node(id="RE-FEAT-111111", kind="requirement", title="Old", deprecated=True)
+    live = Node(id="RE-FEAT-222222", kind="requirement", title="New", deprecated=False)
     graph = Graph([stale, live])
     assert "classDef" not in export_mermaid(graph).diagram
     with_stale = export_mermaid(graph, include_superseded=True).diagram
     assert "classDef stale stroke-dasharray: 5 5" in with_stale.splitlines()
-    assert "class RE111111 stale" in with_stale.splitlines()
+    assert "class REFEAT111111 stale" in with_stale.splitlines()
 
 
 def _big_graph(size: int) -> Graph:
     return Graph(
         [
-            Node(id=f"RE-{index:06d}", kind=None, title="T", deprecated=False)
+            Node(id=f"RE-FEAT-{index:06d}", kind=None, title="T", deprecated=False)
             for index in range(size)
         ]
     )
@@ -349,13 +353,13 @@ def test_no_warning_at_300_nodes() -> None:
 
 def test_warning_counts_nodes_after_root_limiting() -> None:
     nodes = [
-        Node(id=f"RE-{index:06d}", kind=None, title="T", deprecated=False)
+        Node(id=f"RE-FEAT-{index:06d}", kind=None, title="T", deprecated=False)
         for index in range(301)
     ]
-    edges = [Edge(source="RE-000001", type="refines", target="RE-000000")]
+    edges = [Edge(source="RE-GOAL-000001", type="refines", target="RE-FEAT-000000")]
     graph = Graph(nodes, edges)
     assert len(export_mermaid(graph).findings) == 1
-    export = export_mermaid(graph, roots=("RE-000000",), depth=1)
+    export = export_mermaid(graph, roots=("RE-FEAT-000000",), depth=1)
     assert export.findings == ()
 
 

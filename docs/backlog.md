@@ -53,6 +53,9 @@ window of the UUID decodes to `7F3K2Q`). S1 implemented the normative §4.1
 text: Crockford base32 of the most significant 30 bits of `uuid.int`,
 6 characters, MSB-first. The spec examples should be regenerated from the
 rule or the rule clarified.
+Settled in r0.5: the derivation rule is unchanged (most-significant 30 bits,
+MSB-first), the examples were regenerated in the typed form, and IDs now add
+the type abbreviation between prefix and body (D-TYPED-IDS).
 
 SPEC-QUESTION: Does the Term sidecar really pin a `template` field? Appendix
 B.3 gives `Term.template: TemplateRef` ("pinned anyway for uniformity" per
@@ -135,6 +138,10 @@ double-report (error + warning), not the disjoint split via `split_id`
 (where pure prefix drift would warn only). Confirm the intent, or redefine
 `E-ID-DERIVATION` as body-vs-uuid consistency under the document's own
 prefix.
+Settled in r0.5: `E-ID-DERIVATION` covers prefix and type abbreviation, so
+the literal double-report stands; `W-PREFIX-MISMATCH` remains its prefix
+subset. The body remains UUID-derived under the configured prefix and the
+type's abbreviation (D-TYPED-IDS).
 
 SPEC-QUESTION: Does `validate` report `W-NO-GIT-IDENTITY` in degraded mode?
 The code says "Git identity unset" (§14) and §12.2's warning wording

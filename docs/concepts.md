@@ -42,8 +42,23 @@ that need Git say so with a single `note:` line. (§12.1)
 
 A **document** is one Markdown file plus one JSON sidecar — the graph node's
 identity (ID, UUID, title, type, template pin, version, hashes, links) and
-its body. IDs look like `RE-7F3K2Q`: a configured prefix plus Crockford
-base32 derived from the document's UUID, so the ID is stable and unique. (§4)
+its body. IDs are typed: `RE-FEAT-7F3K2Q` is the configured prefix `RE`,
+the type abbreviation `FEAT`, and six Crockford base32 characters derived
+from the document's UUID. The body stays random and non-semantic; the prefix
+and abbreviation carry metadata, so the ID is stable, unique and tells you
+what type of document it names. (§4)
+
+Every type declares its abbreviation in `config.toml` (`[A-Z]{3,5}`, unique
+across types, e.g. `STORY` for `user-story`). It is fixed once a document of
+that type exists; changing it is a hard error (`E-TYPE-ABBREVIATION-CHANGED`).
+Change requests use the fixed, reserved abbreviation `CHG`, e.g.
+`RE-CHG-3M9XA1`. (§4.1, §5.3)
+
+**Upgrading a pre-0.2 repository.** Config schema 1 is refused with exit 3.
+Run the standalone `scripts/migrate_type_ids.py` (dry-run by default,
+`--apply` to write) to rewrite IDs and add type abbreviations; old
+two-segment IDs are not accepted afterwards and there are no aliases. See
+[`docs/migration-typed-ids.md`](migration-typed-ids.md).
 
 Every document has a **kind** — one of five fixed categories the edge rules
 understand:
@@ -57,10 +72,10 @@ understand:
 | `information` | Context | stakeholder, assumption, reference |
 
 A **type** is the user-facing label (`user-story`, `feature`, …). Types are
-defined in `config.toml`, each declaring exactly one kind and a default
-template. Types are cheap to add; kinds are the stable vocabulary the tool
-reasons about. A document's type never changes in v0.1 — to "retype", you
-supersede with a document of the new type. (§5.3)
+defined in `config.toml`, each declaring exactly one kind, a unique
+abbreviation and a default template. Types are cheap to add; kinds are the
+stable vocabulary the tool reasons about. A document's type never changes in
+v0.1 — to "retype", you supersede with a document of the new type. (§5.3)
 
 Each document body follows a **template**: a versioned Markdown skeleton
 (sections with placeholder text) plus a JSON descriptor. Documents pin their
@@ -68,9 +83,9 @@ template name and version, so evolving a template never invalidates existing
 documents by itself. Extra sections are warnings, not errors. (§5.5)
 
 **Referring to other documents in prose** uses explicit syntax only: a
-wikilink `[[RE-7F3K2Q]]` or `[[RE-7F3K2Q|a label]]`, or a Markdown link
+wikilink `[[RE-STORY-7F3K2Q]]` or `[[RE-STORY-7F3K2Q|a label]]`, or a Markdown link
 whose target or text names the ID (or resolves to the document's `.md`
-path), e.g. `[RE-7F3K2Q](../features/RE-7F3K2Q.md)`. Mention IDs are
+path), e.g. `[RE-STORY-7F3K2Q](../user-stories/RE-STORY-7F3K2Q.md)`. Mention IDs are
 canonical uppercase — input arguments stay case-insensitive, prose does
 not. A bare ID-shaped word in text ("multi-target", "baseline-branch") is
 ordinary prose, never a mention, so validation never fires on it; mentions
@@ -221,8 +236,8 @@ A **change request (CR)** describes a proposed change to a set of existing
 documents. CRs are deliberately *outside* the graph — a change record is a
 process artefact that refers to versions of the product description, not
 part of it (§9.1). They live in `changes/`, share the ID space with
-documents, and are optional (`cr.enabled = false` turns the whole feature
-off).
+documents and use the fixed abbreviation `CHG` (`RE-CHG-3M9XA1`), and are
+optional (`cr.enabled = false` turns the whole feature off).
 
 A CR carries:
 

@@ -100,7 +100,7 @@ def uuid_from_body(body: str) -> UUID:
 
 
 def make_document(
-    doc_id: str = "RE-AAAAAA",
+    doc_id: str = "RE-STORY-AAAAAA",
     *,
     doc_type: str = "user-story",
     title: str = "Upload documents",
@@ -110,7 +110,7 @@ def make_document(
     deprecated: bool = False,
 ) -> Document:
     parts = split_id(doc_id)
-    uuid = uuid_from_body(parts[1] if parts is not None else "AAAAAA")
+    uuid = uuid_from_body(parts.body if parts is not None else "AAAAAA")
     return Document(
         schema=1,
         uuid=uuid,
@@ -148,11 +148,11 @@ def write_doc(
     write_sidecar(directory / f"{document.id}.json", document)
 
 
-def make_change(cr_id: str = "RE-DDDDDD") -> ChangeRequest:
+def make_change(cr_id: str = "RE-CHG-DDDDDD") -> ChangeRequest:
     parts = split_id(cr_id)
     return ChangeRequest(
         schema=1,
-        uuid=uuid_from_body(parts[1] if parts is not None else "DDDDDD"),
+        uuid=uuid_from_body(parts.body if parts is not None else "DDDDDD"),
         id=cr_id,
         title="Change something",
         created=CREATED,
@@ -249,13 +249,13 @@ class TestComposedGraphFindings:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 1)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 1)]),
         )
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-LINK-TARGET-MISSING")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
-        assert "RE-BBBBBB" in item.message
+        assert item.subject == "RE-STORY-AAAAAA"
+        assert "RE-STORY-BBBBBB" in item.message
 
     def test_edge_rule(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
@@ -263,14 +263,14 @@ class TestComposedGraphFindings:
             tmp_repo,
             make_document(
                 doc_type="design",
-                links=[("refines", "RE-BBBBBB", 1)],
+                links=[("refines", "RE-STORY-BBBBBB", 1)],
             ),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-EDGE-RULE")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert "refines" in item.message
 
     def test_edge_exclusive(self, tmp_repo: Path) -> None:
@@ -279,32 +279,34 @@ class TestComposedGraphFindings:
             tmp_repo,
             make_document(
                 links=[
-                    ("refines", "RE-BBBBBB", 1),
-                    ("derives-from", "RE-BBBBBB", 1),
+                    ("refines", "RE-STORY-BBBBBB", 1),
+                    ("derives-from", "RE-STORY-BBBBBB", 1),
                 ]
             ),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-EDGE-EXCLUSIVE")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
 
     def test_cycle_report_includes_path(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("depends-on", "RE-BBBBBB", 1)]),
+            make_document(links=[("depends-on", "RE-STORY-BBBBBB", 1)]),
         )
         write_doc(
             tmp_repo,
-            make_document("RE-BBBBBB", links=[("depends-on", "RE-AAAAAA", 1)]),
+            make_document(
+                "RE-STORY-BBBBBB", links=[("depends-on", "RE-STORY-AAAAAA", 1)]
+            ),
         )
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-CYCLE")
         assert item.severity == "E"
-        assert "RE-AAAAAA" in item.message
-        assert "RE-BBBBBB" in item.message
+        assert "RE-STORY-AAAAAA" in item.message
+        assert "RE-STORY-BBBBBB" in item.message
         assert "→" in item.message
 
 
@@ -317,9 +319,11 @@ class TestLinkTypeChecks:
     def test_link_type_unknown(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
         write_doc(tmp_repo, make_document())
-        sidecar = tmp_repo / "documents" / "user-stories" / "RE-AAAAAA.json"
+        sidecar = tmp_repo / "documents" / "user-stories" / "RE-STORY-AAAAAA.json"
         data = json.loads(sidecar.read_text(encoding="utf-8"))
-        data["links"] = [{"type": "refine", "target": "RE-BBBBBB", "target_version": 1}]
+        data["links"] = [
+            {"type": "refine", "target": "RE-STORY-BBBBBB", "target_version": 1}
+        ]
         sidecar.write_text(
             json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -327,7 +331,7 @@ class TestLinkTypeChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-LINK-TYPE-UNKNOWN")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert "refine" in item.message
         # the sidecar also fails schema (Link.type is typed) — both fire
         assert findings_with(findings, "E-SIDECAR-INVALID") != []
@@ -343,13 +347,13 @@ class TestLinkFreshness:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 3)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 3)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-LINK-VERSION-AHEAD")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert item.fix == "gregraph repair versions"
         assert findings_with(findings, "W-LINK-OUTDATED") == []
 
@@ -357,27 +361,27 @@ class TestLinkFreshness:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 1)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 1)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB", version=2))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB", version=2))
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-LINK-OUTDATED")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
-        assert "RE-BBBBBB" in item.message
+        assert item.subject == "RE-STORY-AAAAAA"
+        assert "RE-STORY-BBBBBB" in item.message
 
     def test_link_stale_deprecated_target(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 1)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 1)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB", deprecated=True))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB", deprecated=True))
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-LINK-STALE")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
-        assert "RE-BBBBBB" in item.message
+        assert item.subject == "RE-STORY-AAAAAA"
+        assert "RE-STORY-BBBBBB" in item.message
         # symmetric edges are not "directed edges" (§7.6/§8) — no rule error
         assert findings_with(findings, "E-TARGET-DEPRECATED") == []
 
@@ -385,40 +389,44 @@ class TestLinkFreshness:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 1)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 1)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         write_doc(
             tmp_repo,
-            make_document("RE-CCCCCC", links=[("supersedes", "RE-BBBBBB", 1)]),
+            make_document(
+                "RE-STORY-CCCCCC", links=[("supersedes", "RE-STORY-BBBBBB", 1)]
+            ),
         )
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-LINK-STALE")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
-        assert "RE-BBBBBB" in item.message
+        assert item.subject == "RE-STORY-AAAAAA"
+        assert "RE-STORY-BBBBBB" in item.message
 
     def test_link_pending(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 1)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 1)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         if (tmp_repo / ".git").exists():
             # Grace (§3.3) applies only before the first commit: commit the
             # target once so its later edit is a normal unbumped modification.
             _commit_all(tmp_repo)
         modified = "# Upload documents\n\nEdited but not yet bumped.\n"
-        write_body(tmp_repo / "documents" / "user-stories" / "RE-BBBBBB.md", modified)
+        write_body(
+            tmp_repo / "documents" / "user-stories" / "RE-STORY-BBBBBB.md", modified
+        )
         workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
         findings = validate_workspace(workspace)
         pending = findings_with(findings, "W-LINK-PENDING")
         if (tmp_repo / ".git").exists():
             [item] = pending
             assert item.severity == "W"
-            assert item.subject == "RE-AAAAAA"
-            assert "RE-BBBBBB" in item.message
+            assert item.subject == "RE-STORY-AAAAAA"
+            assert "RE-STORY-BBBBBB" in item.message
         else:
             # §7.4: pending-outdated is a Git-mode state only
             assert pending == []
@@ -430,11 +438,13 @@ class TestLinkFreshness:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 1)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 1)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         modified = "# Upload documents\n\nEdited but not yet bumped.\n"
-        write_body(tmp_repo / "documents" / "user-stories" / "RE-BBBBBB.md", modified)
+        write_body(
+            tmp_repo / "documents" / "user-stories" / "RE-STORY-BBBBBB.md", modified
+        )
         workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
         findings = validate_workspace(workspace)
         assert findings_with(findings, "W-LINK-PENDING") == []
@@ -445,21 +455,23 @@ class TestLinkFreshness:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 2)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 2)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         if (tmp_repo / ".git").exists():
             # commit once: the target leaves the grace state (§3.3 rule 5)
             _commit_all(tmp_repo)
         modified = "# Upload documents\n\nEdited but not yet bumped.\n"
-        write_body(tmp_repo / "documents" / "user-stories" / "RE-BBBBBB.md", modified)
+        write_body(
+            tmp_repo / "documents" / "user-stories" / "RE-STORY-BBBBBB.md", modified
+        )
         workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
         findings = validate_workspace(workspace)
         # tv == effective (not merely <= version) is not the ahead error
         assert findings_with(findings, "E-LINK-VERSION-AHEAD") == []
         [item] = findings_with(findings, "W-LINK-PENDING")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert item.fix == "gregraph sync --bump"
         assert "pending version" in item.message
 
@@ -468,18 +480,20 @@ class TestLinkFreshness:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 3)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 3)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         if (tmp_repo / ".git").exists():
             _commit_all(tmp_repo)
         modified = "# Upload documents\n\nEdited but not yet bumped.\n"
-        write_body(tmp_repo / "documents" / "user-stories" / "RE-BBBBBB.md", modified)
+        write_body(
+            tmp_repo / "documents" / "user-stories" / "RE-STORY-BBBBBB.md", modified
+        )
         workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
         findings = validate_workspace(workspace)
         [item] = findings_with(findings, "E-LINK-VERSION-AHEAD")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert item.fix == "gregraph repair versions"
         assert findings_with(findings, "W-LINK-PENDING") == []
 
@@ -488,14 +502,14 @@ class TestLinkFreshness:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB", 2)]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB", 2)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         workspace = Workspace.open(tmp_repo, git=GitAdapter(tmp_repo))
         findings = validate_workspace(workspace)
         [item] = findings_with(findings, "E-LINK-VERSION-AHEAD")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert item.fix == "gregraph repair versions"
         assert findings_with(findings, "W-LINK-PENDING") == []
 
@@ -504,11 +518,15 @@ class TestLinkFreshness:
         write_doc(tmp_repo, make_document())
         write_doc(
             tmp_repo,
-            make_document("RE-BBBBBB", links=[("supersedes", "RE-AAAAAA", 1)]),
+            make_document(
+                "RE-STORY-BBBBBB", links=[("supersedes", "RE-STORY-AAAAAA", 1)]
+            ),
         )
         write_doc(
             tmp_repo,
-            make_document("RE-CCCCCC", links=[("supersedes", "RE-BBBBBB", 1)]),
+            make_document(
+                "RE-STORY-CCCCCC", links=[("supersedes", "RE-STORY-BBBBBB", 1)]
+            ),
         )
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "W-LINK-STALE") == []
@@ -527,17 +545,19 @@ class TestTargetStateChecks:
         write_doc(tmp_repo, make_document())
         write_doc(
             tmp_repo,
-            make_document("RE-BBBBBB", links=[("refines", "RE-AAAAAA", 1)]),
+            make_document("RE-STORY-BBBBBB", links=[("refines", "RE-STORY-AAAAAA", 1)]),
         )
         write_doc(
             tmp_repo,
-            make_document("RE-CCCCCC", links=[("supersedes", "RE-AAAAAA", 1)]),
+            make_document(
+                "RE-STORY-CCCCCC", links=[("supersedes", "RE-STORY-AAAAAA", 1)]
+            ),
         )
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-TARGET-SUPERSEDED")
         assert item.severity == "E"
-        assert item.subject == "RE-BBBBBB"
-        assert "RE-AAAAAA" in item.message
+        assert item.subject == "RE-STORY-BBBBBB"
+        assert "RE-STORY-AAAAAA" in item.message
         # the same edge is also stale on the §7.4 freshness axis
         assert findings_with(findings, "W-LINK-STALE") != []
 
@@ -546,22 +566,22 @@ class TestTargetStateChecks:
         write_doc(tmp_repo, make_document(deprecated=True))
         write_doc(
             tmp_repo,
-            make_document("RE-BBBBBB", links=[("refines", "RE-AAAAAA", 1)]),
+            make_document("RE-STORY-BBBBBB", links=[("refines", "RE-STORY-AAAAAA", 1)]),
         )
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-TARGET-DEPRECATED")
         assert item.severity == "E"
-        assert item.subject == "RE-BBBBBB"
-        assert "RE-AAAAAA" in item.message
+        assert item.subject == "RE-STORY-BBBBBB"
+        assert "RE-STORY-AAAAAA" in item.message
 
     def test_symmetric_history_edge_is_not_an_error(self, tmp_repo: Path) -> None:
         # §11.2: the conflicts-with edge remains on dead documents as history
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("conflicts-with", "RE-BBBBBB", 1)]),
+            make_document(links=[("conflicts-with", "RE-STORY-BBBBBB", 1)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB", deprecated=True))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB", deprecated=True))
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "E-TARGET-DEPRECATED") == []
         assert findings_with(findings, "E-TARGET-SUPERSEDED") == []
@@ -572,11 +592,15 @@ class TestTargetStateChecks:
         write_doc(tmp_repo, make_document())
         write_doc(
             tmp_repo,
-            make_document("RE-BBBBBB", links=[("supersedes", "RE-AAAAAA", 1)]),
+            make_document(
+                "RE-STORY-BBBBBB", links=[("supersedes", "RE-STORY-AAAAAA", 1)]
+            ),
         )
         write_doc(
             tmp_repo,
-            make_document("RE-CCCCCC", links=[("supersedes", "RE-AAAAAA", 1)]),
+            make_document(
+                "RE-STORY-CCCCCC", links=[("supersedes", "RE-STORY-AAAAAA", 1)]
+            ),
         )
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "E-TARGET-SUPERSEDED") == []
@@ -594,7 +618,7 @@ class TestOrphanChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-ORPHAN")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
 
     def test_deprecated_orphan_is_silent(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
@@ -611,43 +635,43 @@ class TestOrphanChecks:
 class TestMentionChecks:
     def test_mention_unlinked(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\nSee [[RE-BBBBBB]] for the parent story.\n"
+        body = "# Upload documents\n\nSee [[RE-STORY-BBBBBB]] for the parent story.\n"
         write_doc(tmp_repo, make_document(body=body), body=body)
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-MENTION-UNLINKED")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
-        assert "RE-BBBBBB" in item.message
+        assert item.subject == "RE-STORY-AAAAAA"
+        assert "RE-STORY-BBBBBB" in item.message
 
     def test_mention_with_edge_is_silent(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\nSee [[RE-BBBBBB]] for the parent story.\n"
+        body = "# Upload documents\n\nSee [[RE-STORY-BBBBBB]] for the parent story.\n"
         write_doc(
             tmp_repo,
-            make_document(body=body, links=[("relates-to", "RE-BBBBBB", 1)]),
+            make_document(body=body, links=[("relates-to", "RE-STORY-BBBBBB", 1)]),
             body=body,
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "W-MENTION-UNLINKED") == []
 
     def test_mention_unknown(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\nSee [[RE-ZZZZZZ]] for the parent story.\n"
+        body = "# Upload documents\n\nSee [[RE-STORY-ZZZZZZ]] for the parent story.\n"
         write_doc(tmp_repo, make_document(body=body), body=body)
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-MENTION-UNKNOWN")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
-        assert "RE-ZZZZZZ" in item.message
+        assert item.subject == "RE-STORY-AAAAAA"
+        assert "RE-STORY-ZZZZZZ" in item.message
 
     def test_cr_ids_are_exempt(self, tmp_repo: Path) -> None:
         # §5.2: document bodies may mention CR IDs freely
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\nSee [[RE-DDDDDD]] for the change request.\n"
+        body = "# Upload documents\n\nSee [[RE-CHG-DDDDDD]] for the change request.\n"
         write_doc(tmp_repo, make_document(body=body), body=body)
-        write_change(tmp_repo, make_change("RE-DDDDDD"))
+        write_change(tmp_repo, make_change("RE-CHG-DDDDDD"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "W-MENTION-UNLINKED") == []
         assert findings_with(findings, "E-MENTION-UNKNOWN") == []
@@ -660,19 +684,19 @@ class TestMentionChecks:
         body = (
             "# Upload documents\n"
             "\n"
-            "The multi-target and baseline-branch designs see RE-BBBBBB.\n"
+            "The multi-target and baseline-branch designs see RE-STORY-BBBBBB.\n"
         )
         write_doc(tmp_repo, make_document(body=body), body=body)
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "W-MENTION-UNLINKED") == []
         assert findings_with(findings, "E-MENTION-UNKNOWN") == []
         # The explicit wikilink form still is a mention.
-        explicit = "# Upload documents\n\nSee [[RE-BBBBBB]] for details.\n"
+        explicit = "# Upload documents\n\nSee [[RE-STORY-BBBBBB]] for details.\n"
         write_doc(tmp_repo, make_document(body=explicit), body=explicit)
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-MENTION-UNLINKED")
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
 
 
 # --------------------------------------------------------------------------
@@ -683,49 +707,51 @@ class TestMentionChecks:
 class TestAssetChecks:
     def test_asset_missing(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\n![shot](../../assets/RE-AAAAAA/missing.png)\n"
+        body = (
+            "# Upload documents\n\n![shot](../../assets/RE-STORY-AAAAAA/missing.png)\n"
+        )
         write_doc(tmp_repo, make_document(body=body), body=body)
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-ASSET-MISSING")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert "missing.png" in item.message
 
     def test_asset_foreign(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        body = "# Upload documents\n\n![shot](../../assets/RE-BBBBBB/file.png)\n"
+        body = "# Upload documents\n\n![shot](../../assets/RE-STORY-BBBBBB/file.png)\n"
         write_doc(tmp_repo, make_document(body=body), body=body)
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
-        folder = tmp_repo / "assets" / "RE-BBBBBB"
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
+        folder = tmp_repo / "assets" / "RE-STORY-BBBBBB"
         folder.mkdir(parents=True)
         (folder / "file.png").write_bytes(b"png")
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-ASSET-FOREIGN")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
-        assert "RE-BBBBBB" in item.message
+        assert item.subject == "RE-STORY-AAAAAA"
+        assert "RE-STORY-BBBBBB" in item.message
 
     def test_asset_orphan(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
         write_doc(tmp_repo, make_document())
-        folder = tmp_repo / "assets" / "RE-AAAAAA"
+        folder = tmp_repo / "assets" / "RE-STORY-AAAAAA"
         folder.mkdir(parents=True)
         (folder / "extra.png").write_bytes(b"png")
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-ASSET-ORPHAN")
         assert item.severity == "W"
-        assert item.subject == Path("assets/RE-AAAAAA/extra.png")
+        assert item.subject == Path("assets/RE-STORY-AAAAAA/extra.png")
 
     def test_asset_large(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo, config=Config(assets=AssetsSection(max_size_kb=1)))
         write_doc(tmp_repo, make_document())
-        folder = tmp_repo / "assets" / "RE-AAAAAA"
+        folder = tmp_repo / "assets" / "RE-STORY-AAAAAA"
         folder.mkdir(parents=True)
         (folder / "big.bin").write_bytes(b"x" * 2048)
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-ASSET-LARGE")
         assert item.severity == "W"
-        assert item.subject == Path("assets/RE-AAAAAA/big.bin")
+        assert item.subject == Path("assets/RE-STORY-AAAAAA/big.bin")
 
     def test_asset_ownerless(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
@@ -749,23 +775,23 @@ class TestOpenConflicts:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("conflicts-with", "RE-BBBBBB", 1)]),
+            make_document(links=[("conflicts-with", "RE-STORY-BBBBBB", 1)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-CONFLICT-OPEN")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
-        assert "RE-BBBBBB" in item.message
+        assert item.subject == "RE-STORY-AAAAAA"
+        assert "RE-STORY-BBBBBB" in item.message
 
     def test_conflict_with_dead_endpoint_is_closed(self, tmp_repo: Path) -> None:
         # §11.1: both endpoints must be live for the conflict to be open
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("conflicts-with", "RE-BBBBBB", 1)]),
+            make_document(links=[("conflicts-with", "RE-STORY-BBBBBB", 1)]),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB", deprecated=True))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB", deprecated=True))
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "W-CONFLICT-OPEN") == []
 

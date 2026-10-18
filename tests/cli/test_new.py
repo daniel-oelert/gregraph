@@ -203,7 +203,7 @@ def test_new_refused_initial_link_writes_nothing(template_repo: Path, capsys) ->
                 "--title",
                 "T",
                 "--link",
-                "refines:RE-NOSUCH",
+                "refines:RE-STORY-ZZZZZZ",
                 "--no-input",
             ]
         )

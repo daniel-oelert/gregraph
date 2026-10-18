@@ -53,7 +53,7 @@ describe("DocumentDetail body", () => {
     fireEvent.change(screen.getByLabelText("Markdown body"), { target: { value: "# Upload documents\n\nEdited" } });
     await user.click(screen.getByRole("button", { name: "Save body" }));
 
-    expect(api.saveBody).toHaveBeenCalledWith("RE-AAAAAA", {
+    expect(api.saveBody).toHaveBeenCalledWith("RE-FEAT-AAAAAA", {
       text: "# Upload documents\n\nEdited",
       base_hash: "sha256:aaa",
     });
@@ -78,9 +78,9 @@ describe("DocumentDetail body", () => {
     await user.type(textarea, "late keystrokes");
     expect(textarea).toHaveValue("saved text");
 
-    pending.resolve({ id: "RE-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] });
+    pending.resolve({ id: "RE-FEAT-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] });
     await waitFor(() => expect(screen.queryByLabelText("Markdown body")).toBeNull());
-    expect(api.saveBody).toHaveBeenCalledWith("RE-AAAAAA", { text: "saved text", base_hash: "sha256:aaa" });
+    expect(api.saveBody).toHaveBeenCalledWith("RE-FEAT-AAAAAA", { text: "saved text", base_hash: "sha256:aaa" });
   });
 
   it("re-enables the editor with the draft intact when a save fails", async () => {
@@ -135,7 +135,7 @@ describe("DocumentDetail body", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/changed/i);
     expect(api.saveBody).toHaveBeenCalledTimes(1);
-    expect(api.saveBody).toHaveBeenLastCalledWith("RE-AAAAAA", {
+    expect(api.saveBody).toHaveBeenLastCalledWith("RE-FEAT-AAAAAA", {
       text: "my careful draft",
       base_hash: "sha256:aaa",
     });
@@ -143,13 +143,13 @@ describe("DocumentDetail body", () => {
 
     await user.click(screen.getByRole("button", { name: "Reload latest version" }));
 
-    expect(api.getDocument).toHaveBeenCalledWith("RE-AAAAAA");
+    expect(api.getDocument).toHaveBeenCalledWith("RE-FEAT-AAAAAA");
     expect(screen.getByLabelText("Markdown body")).toHaveValue("my careful draft");
     expect(await screen.findByText(/Server version/)).toBeInTheDocument();
     expect(api.saveBody).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "Save body" }));
-    expect(api.saveBody).toHaveBeenLastCalledWith("RE-AAAAAA", {
+    expect(api.saveBody).toHaveBeenLastCalledWith("RE-FEAT-AAAAAA", {
       text: "my careful draft",
       base_hash: "sha256:server",
     });
@@ -161,7 +161,7 @@ describe("DocumentDetail body", () => {
       .mockRejectedValueOnce(
         new ApiError(409, "Body is missing.", { code: "E-BODY-MISSING", severity: "E", message: "Body is missing." }),
       )
-      .mockResolvedValueOnce({ id: "RE-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] });
+      .mockResolvedValueOnce({ id: "RE-FEAT-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] });
     const { api, onChanged } = renderDetail(docA, { saveBody });
     const user = userEvent.setup();
 
@@ -177,7 +177,7 @@ describe("DocumentDetail body", () => {
     await user.click(screen.getByRole("button", { name: "Save body" }));
 
     expect(api.saveBody).toHaveBeenCalledTimes(2);
-    expect(api.saveBody).toHaveBeenLastCalledWith("RE-AAAAAA", { text: "keep me", base_hash: "sha256:aaa" });
+    expect(api.saveBody).toHaveBeenLastCalledWith("RE-FEAT-AAAAAA", { text: "keep me", base_hash: "sha256:aaa" });
     expect(onChanged).toHaveBeenCalled();
   });
 
@@ -241,8 +241,8 @@ describe("DocumentDetail snapshot after a successful save", () => {
   it("editing again right after a save starts from the saved text and the new hash, even before the parent refetches", async () => {
     const saveBody = vi
       .fn()
-      .mockResolvedValueOnce({ id: "RE-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] })
-      .mockResolvedValueOnce({ id: "RE-AAAAAA", body_hash: "sha256:newer", title: "T", changed: true, findings: [] });
+      .mockResolvedValueOnce({ id: "RE-FEAT-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] })
+      .mockResolvedValueOnce({ id: "RE-FEAT-AAAAAA", body_hash: "sha256:newer", title: "T", changed: true, findings: [] });
     const { api } = renderDetail(docA, { saveBody });
     const user = userEvent.setup();
 
@@ -259,7 +259,7 @@ describe("DocumentDetail snapshot after a successful save", () => {
     expect(screen.getByLabelText("Markdown body")).toHaveValue("# Upload documents\n\nSaved line");
     await user.click(screen.getByRole("button", { name: "Save body" }));
 
-    expect(api.saveBody).toHaveBeenLastCalledWith("RE-AAAAAA", {
+    expect(api.saveBody).toHaveBeenLastCalledWith("RE-FEAT-AAAAAA", {
       text: "# Upload documents\n\nSaved line",
       base_hash: "sha256:new",
     });
@@ -277,8 +277,8 @@ describe("DocumentDetail snapshot after a successful save", () => {
   ])("acknowledges a save with %s exactly as core writes it, before any refetch", async (_label, submitted, written) => {
     const saveBody = vi
       .fn()
-      .mockResolvedValueOnce({ id: "RE-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] })
-      .mockResolvedValueOnce({ id: "RE-AAAAAA", body_hash: "sha256:newer", title: "T", changed: true, findings: [] });
+      .mockResolvedValueOnce({ id: "RE-FEAT-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] })
+      .mockResolvedValueOnce({ id: "RE-FEAT-AAAAAA", body_hash: "sha256:newer", title: "T", changed: true, findings: [] });
     const { api } = renderDetail(docA, { saveBody });
     const user = userEvent.setup();
 
@@ -292,12 +292,12 @@ describe("DocumentDetail snapshot after a successful save", () => {
     await user.click(screen.getByRole("button", { name: "Edit body" }));
     expect(screen.getByLabelText("Markdown body")).toHaveValue(written);
     await user.click(screen.getByRole("button", { name: "Save body" }));
-    expect(api.saveBody).toHaveBeenLastCalledWith("RE-AAAAAA", { text: written, base_hash: "sha256:new" });
+    expect(api.saveBody).toHaveBeenLastCalledWith("RE-FEAT-AAAAAA", { text: written, base_hash: "sha256:new" });
   });
 
   it("a late parent re-render with the old props cannot undo the acknowledged save", async () => {
     const { api, rerender } = renderDetail(docA, {
-      saveBody: vi.fn(async () => ({ id: "RE-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] })),
+      saveBody: vi.fn(async () => ({ id: "RE-FEAT-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] })),
     });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Edit body" }));
@@ -314,7 +314,7 @@ describe("DocumentDetail snapshot after a successful save", () => {
 
   it("fresh parent props replace the snapshot after the save", async () => {
     const { api, rerender } = renderDetail(docA, {
-      saveBody: vi.fn(async () => ({ id: "RE-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] })),
+      saveBody: vi.fn(async () => ({ id: "RE-FEAT-AAAAAA", body_hash: "sha256:new", title: "T", changed: true, findings: [] })),
     });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Edit body" }));
@@ -327,7 +327,7 @@ describe("DocumentDetail snapshot after a successful save", () => {
     expect(screen.getByLabelText("Body text")).toHaveTextContent("server body");
     await user.click(screen.getByRole("button", { name: "Edit body" }));
     await user.click(screen.getByRole("button", { name: "Save body" }));
-    expect(api.saveBody).toHaveBeenLastCalledWith("RE-AAAAAA", { text: "server body\n", base_hash: "sha256:server" });
+    expect(api.saveBody).toHaveBeenLastCalledWith("RE-FEAT-AAAAAA", { text: "server body\n", base_hash: "sha256:server" });
   });
 
   it("a background change never replaces an active draft: saving it still uses the hash it started from", async () => {
@@ -343,7 +343,7 @@ describe("DocumentDetail snapshot after a successful save", () => {
 
     expect(screen.getByLabelText("Markdown body")).toHaveValue("my draft");
     await user.click(screen.getByRole("button", { name: "Save body" }));
-    expect(api.saveBody).toHaveBeenCalledWith("RE-AAAAAA", { text: "my draft", base_hash: "sha256:aaa" });
+    expect(api.saveBody).toHaveBeenCalledWith("RE-FEAT-AAAAAA", { text: "my draft", base_hash: "sha256:aaa" });
     expect(await screen.findByRole("button", { name: "Reload latest version" })).toBeInTheDocument();
   });
 });
@@ -354,9 +354,9 @@ describe("DocumentDetail links and tags", () => {
     const user = userEvent.setup();
 
     const outbound = screen.getByRole("list", { name: "Outbound links" });
-    await user.click(within(outbound).getByRole("button", { name: "RE-BBBBBB" }));
+    await user.click(within(outbound).getByRole("button", { name: "RE-GOAL-BBBBBB" }));
 
-    expect(onSelect).toHaveBeenCalledWith("RE-BBBBBB");
+    expect(onSelect).toHaveBeenCalledWith("RE-GOAL-BBBBBB");
   });
 
   it("opens an inbound source through onSelect", async () => {
@@ -364,21 +364,21 @@ describe("DocumentDetail links and tags", () => {
     const user = userEvent.setup();
 
     const inbound = screen.getByRole("list", { name: "Inbound links" });
-    await user.click(within(inbound).getByRole("button", { name: "RE-CCCCCC" }));
+    await user.click(within(inbound).getByRole("button", { name: "RE-TEST-CCCCCC" }));
 
-    expect(onSelect).toHaveBeenCalledWith("RE-CCCCCC");
+    expect(onSelect).toHaveBeenCalledWith("RE-TEST-CCCCCC");
   });
 
   it("removes a link with the exact source, type, and target", async () => {
     const { api, onChanged } = renderDetail();
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: "Remove refines link to RE-BBBBBB" }));
+    await user.click(screen.getByRole("button", { name: "Remove refines link to RE-GOAL-BBBBBB" }));
 
     expect(api.removeLink).toHaveBeenCalledWith({
-      source: "RE-AAAAAA",
+      source: "RE-FEAT-AAAAAA",
       type: "refines",
-      target: "RE-BBBBBB",
+      target: "RE-GOAL-BBBBBB",
     });
     expect(onChanged).toHaveBeenCalled();
   });
@@ -392,13 +392,13 @@ describe("DocumentDetail links and tags", () => {
     const user = userEvent.setup();
 
     await user.selectOptions(screen.getByLabelText("Link type"), "depends-on");
-    await user.selectOptions(screen.getByLabelText("Target document"), "RE-CCCCCC");
+    await user.selectOptions(screen.getByLabelText("Target document"), "RE-TEST-CCCCCC");
     await user.click(screen.getByRole("button", { name: "Add link" }));
 
     expect(api.createLink).toHaveBeenCalledWith({
-      source: "RE-AAAAAA",
+      source: "RE-FEAT-AAAAAA",
       type: "depends-on",
-      target: "RE-CCCCCC",
+      target: "RE-TEST-CCCCCC",
     });
     expect(await screen.findByRole("alert")).toHaveTextContent("Link would create a cycle.");
     expect(onChanged).not.toHaveBeenCalled();
@@ -410,10 +410,10 @@ describe("DocumentDetail links and tags", () => {
 
     await user.type(screen.getByLabelText("New tag"), "urgent");
     await user.click(screen.getByRole("button", { name: "Add tag" }));
-    expect(api.updateTags).toHaveBeenLastCalledWith("RE-AAAAAA", ["core", "urgent"]);
+    expect(api.updateTags).toHaveBeenLastCalledWith("RE-FEAT-AAAAAA", ["core", "urgent"]);
 
     await user.click(screen.getByRole("button", { name: "Remove tag core" }));
-    expect(api.updateTags).toHaveBeenLastCalledWith("RE-AAAAAA", []);
+    expect(api.updateTags).toHaveBeenLastCalledWith("RE-FEAT-AAAAAA", []);
     expect(onChanged).toHaveBeenCalledTimes(2);
   });
 });

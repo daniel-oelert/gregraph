@@ -129,7 +129,7 @@ def test_template_list_json_counts_documents(repo: Path) -> None:
     config = Config()
     spec = config.types["user-story"]
     generated = UUID(int=7 << 98)
-    doc_id = derive_id(generated)
+    doc_id = derive_id(generated, config.ids.prefix, spec.abbreviation)
     body = "# T\n\n## Story\n\nx\n"
     document = Document(
         schema=1,

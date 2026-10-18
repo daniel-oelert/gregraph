@@ -108,7 +108,7 @@ def uuid_from_body(body: str) -> UUID:
 
 
 def make_document(
-    doc_id: str = "RE-AAAAAA",
+    doc_id: str = "RE-STORY-AAAAAA",
     *,
     doc_type: str = "user-story",
     title: str = "Upload documents",
@@ -118,7 +118,7 @@ def make_document(
 ) -> Document:
     if uuid is None:
         parts = split_id(doc_id)
-        uuid = uuid_from_body(parts[1] if parts is not None else "AAAAAA")
+        uuid = uuid_from_body(parts.body if parts is not None else "AAAAAA")
     return Document(
         schema=1,
         uuid=uuid,
@@ -160,7 +160,7 @@ def write_doc(
     write_sidecar(directory / f"{stem}.json", document)
 
 
-def write_body_only(root: Path, body: str, stem: str = "RE-AAAAAA") -> Path:
+def write_body_only(root: Path, body: str, stem: str = "RE-STORY-AAAAAA") -> Path:
     directory = root / "documents" / "user-stories"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{stem}.md"
@@ -257,7 +257,7 @@ class TestComposedLoadFindings:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-SIDECAR-MISSING")
         assert item.severity == "E"
-        assert item.subject == Path("documents/user-stories/RE-AAAAAA.md")
+        assert item.subject == Path("documents/user-stories/RE-STORY-AAAAAA.md")
 
     def test_body_missing(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
@@ -271,7 +271,7 @@ class TestComposedLoadFindings:
         setup_repo(tmp_repo)
         write_body_only(tmp_repo, DEFAULT_BODY)
         directory = tmp_repo / "documents" / "user-stories"
-        (directory / "RE-AAAAAA.json").write_text("{not json", encoding="utf-8")
+        (directory / "RE-STORY-AAAAAA.json").write_text("{not json", encoding="utf-8")
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-SIDECAR-INVALID")
         assert item.severity == "E"
@@ -283,7 +283,7 @@ class TestComposedLoadFindings:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-ID-DUPLICATE")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert item.fix is not None
         assert "repair regenerate-id" in item.fix
 
@@ -296,48 +296,61 @@ class TestComposedLoadFindings:
 class TestIdentifierChecks:
     def test_id_filename(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        write_doc(tmp_repo, make_document("RE-AAAAAA"), stem="RE-BBBBBB")
+        write_doc(tmp_repo, make_document("RE-STORY-AAAAAA"), stem="RE-STORY-BBBBBB")
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-ID-FILENAME")
         assert item.severity == "E"
-        assert item.subject == Path("documents/user-stories/RE-BBBBBB.json")
-        assert "RE-AAAAAA" in item.message
-        assert "RE-BBBBBB" in item.message
+        assert item.subject == Path("documents/user-stories/RE-STORY-BBBBBB.json")
+        assert "RE-STORY-AAAAAA" in item.message
+        assert "RE-STORY-BBBBBB" in item.message
 
     def test_id_derivation(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        write_doc(tmp_repo, make_document("RE-AAAAAA", uuid=uuid_from_body("BBBBBB")))
+        write_doc(
+            tmp_repo, make_document("RE-STORY-AAAAAA", uuid=uuid_from_body("BBBBBB"))
+        )
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-ID-DERIVATION")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
-        assert derive_id(uuid_from_body("BBBBBB")) in item.message
+        assert item.subject == "RE-STORY-AAAAAA"
+        assert derive_id(uuid_from_body("BBBBBB"), "RE", "STORY") in item.message
         assert item.fix is not None
         assert "repair regenerate-id" in item.fix
 
     def test_uuid_duplicate(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
         shared = uuid_from_body("AAAAAA")
-        write_doc(tmp_repo, make_document("RE-AAAAAA", uuid=shared))
-        write_doc(tmp_repo, make_document("RE-BBBBBB", uuid=shared))
+        write_doc(tmp_repo, make_document("RE-STORY-AAAAAA", uuid=shared))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB", uuid=shared))
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-UUID-DUPLICATE")
         assert item.severity == "E"
-        assert item.subject == "RE-BBBBBB"
-        assert "RE-AAAAAA" in item.message
+        assert item.subject == "RE-STORY-BBBBBB"
+        assert "RE-STORY-AAAAAA" in item.message
 
     def test_prefix_mismatch(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
-        write_doc(tmp_repo, make_document("XX-AAAAAA"))
+        write_doc(tmp_repo, make_document("XX-STORY-AAAAAA"))
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-PREFIX-MISMATCH")
         assert item.severity == "W"
-        assert item.subject == "XX-AAAAAA"
+        assert item.subject == "XX-STORY-AAAAAA"
         # §4.3 is literal: the derivation invariant uses the *configured*
         # prefix, so a prefix mismatch also fails derivation (see the
         # SPEC-QUESTION in docs/backlog.md).
         [derivation] = findings_with(findings, "E-ID-DERIVATION")
-        assert derivation.subject == "XX-AAAAAA"
+        assert derivation.subject == "XX-STORY-AAAAAA"
+
+    def test_legacy_two_segment_id(self, tmp_repo: Path) -> None:
+        setup_repo(tmp_repo)
+        write_doc(tmp_repo, make_document("RE-AAAAAA"))
+        findings = validate_workspace(Workspace.open(tmp_repo))
+        [item] = findings_with(findings, "E-ID-LEGACY")
+        assert item.severity == "E"
+        assert item.subject == "RE-AAAAAA"
+        assert "RE-STORY-AAAAAA" in item.message
+        assert item.fix == "python scripts/migrate_type_ids.py --apply"
+        assert findings_with(findings, "E-ID-DERIVATION") == []
 
 
 # --------------------------------------------------------------------------
@@ -352,7 +365,7 @@ class TestTypeChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-TYPE-UNKNOWN")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert "nonexistent-type" in item.message
 
     def test_type_kind_changed(self, tmp_repo: Path) -> None:
@@ -378,6 +391,31 @@ class TestTypeChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "E-TYPE-KIND-CHANGED") == []
 
+    def test_type_abbreviation_changed(self, tmp_repo: Path) -> None:
+        setup_repo(tmp_repo)
+        write_cache(
+            tmp_repo,
+            cache_model(type_abbreviations={"user-story": "STOR"}),
+        )
+        write_doc(tmp_repo, make_document(doc_type="user-story"))
+        findings = validate_workspace(Workspace.open(tmp_repo))
+        [item] = findings_with(findings, "E-TYPE-ABBREVIATION-CHANGED")
+        assert item.severity == "E"
+        assert item.subject == Path(".gregraph/config.toml")
+        assert "STOR" in item.message
+        assert "STORY" in item.message
+
+    def test_type_abbreviation_change_without_documents_is_free(
+        self, tmp_repo: Path
+    ) -> None:
+        setup_repo(tmp_repo)
+        write_cache(
+            tmp_repo,
+            cache_model(type_abbreviations={"user-story": "STOR"}),
+        )
+        findings = validate_workspace(Workspace.open(tmp_repo))
+        assert findings_with(findings, "E-TYPE-ABBREVIATION-CHANGED") == []
+
 
 # --------------------------------------------------------------------------
 # body conventions (spec §5.2)
@@ -391,7 +429,7 @@ class TestBodyChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-TITLE-MISSING")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert item.fix is not None
         assert item.fix.startswith("gregraph edit")
 
@@ -405,7 +443,7 @@ class TestBodyChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-FRONTMATTER-FORBIDDEN")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert item.fix is not None
         assert item.fix.startswith("gregraph edit")
 
@@ -422,7 +460,7 @@ class TestTemplateChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-TEMPLATE-UNKNOWN")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert "missing-template" in item.message
 
     def test_template_unknown_version(self, tmp_repo: Path) -> None:
@@ -463,7 +501,7 @@ class TestTemplateChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-TEMPLATE-DEPRECATED")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert item.fix is not None
         assert item.fix.startswith("gregraph migrate")
 
@@ -487,7 +525,7 @@ class TestSectionChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-SECTION-REQUIRED-MISSING")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert "Story" in item.message
 
     def test_section_required_empty(self, tmp_repo: Path) -> None:
@@ -504,7 +542,7 @@ class TestSectionChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "E-SECTION-REQUIRED-EMPTY")
         assert item.severity == "E"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert "Story" in item.message
 
     def test_section_required_placeholder_only(self, tmp_repo: Path) -> None:
@@ -538,7 +576,7 @@ class TestSectionChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-SECTION-UNKNOWN")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
         assert "Extra thinking" in item.message
 
     def test_section_order(self, tmp_repo: Path) -> None:
@@ -555,7 +593,7 @@ class TestSectionChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-SECTION-ORDER")
         assert item.severity == "W"
-        assert item.subject == "RE-AAAAAA"
+        assert item.subject == "RE-STORY-AAAAAA"
 
 
 # --------------------------------------------------------------------------
@@ -571,14 +609,14 @@ class TestSerialisationChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-LINE-ENDINGS")
         assert item.severity == "W"
-        assert item.subject == Path("documents/user-stories/RE-AAAAAA.md")
+        assert item.subject == Path("documents/user-stories/RE-STORY-AAAAAA.md")
         assert item.fix is not None
         assert item.fix.startswith("gregraph sync")
 
     def test_sidecar_noncanonical(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
         write_doc(tmp_repo, make_document())
-        sidecar = tmp_repo / "documents" / "user-stories" / "RE-AAAAAA.json"
+        sidecar = tmp_repo / "documents" / "user-stories" / "RE-STORY-AAAAAA.json"
         data = json.loads(sidecar.read_text(encoding="utf-8"))
         sidecar.write_text(
             json.dumps(data, indent=4) + "\n", encoding="utf-8", newline="\n"
@@ -586,7 +624,7 @@ class TestSerialisationChecks:
         findings = validate_workspace(Workspace.open(tmp_repo))
         [item] = findings_with(findings, "W-SIDECAR-NONCANONICAL")
         assert item.severity == "W"
-        assert item.subject == Path("documents/user-stories/RE-AAAAAA.json")
+        assert item.subject == Path("documents/user-stories/RE-STORY-AAAAAA.json")
         assert item.fix is not None
         assert item.fix.startswith("gregraph sync")
 
@@ -595,7 +633,7 @@ class TestSerialisationChecks:
         write_doc(tmp_repo, make_document())
         findings = validate_workspace(Workspace.open(tmp_repo))
         assert findings_with(findings, "W-SIDECAR-NONCANONICAL") == []
-        sidecar = tmp_repo / "documents" / "user-stories" / "RE-AAAAAA.json"
+        sidecar = tmp_repo / "documents" / "user-stories" / "RE-STORY-AAAAAA.json"
         document = make_document()
         assert sidecar.read_bytes() == canonical_json_dumps(document).encode("utf-8")
 
@@ -637,10 +675,12 @@ class TestGitIdentityCheck:
 def cache_model(
     *,
     types_seen: dict[str, str] | None = None,
+    type_abbreviations: dict[str, str] | None = None,
     templates_seen: dict[str, str] | None = None,
 ) -> CacheIndex:
     return CacheIndex(
         types_seen={} if types_seen is None else types_seen,
+        type_abbreviations=({} if type_abbreviations is None else type_abbreviations),
         templates_seen={} if templates_seen is None else templates_seen,
     )
 
@@ -650,14 +690,14 @@ class TestValidateWorkspace:
         setup_repo(tmp_repo)
         # S11: an unlinked document is W-ORPHAN (spec §6.3), so a clean
         # repository links its documents.
-        write_doc(tmp_repo, make_document(links=[("refines", "RE-BBBBBB")]))
-        write_doc(tmp_repo, make_document("RE-BBBBBB"))
+        write_doc(tmp_repo, make_document(links=[("refines", "RE-STORY-BBBBBB")]))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"))
         assert validate_workspace(Workspace.open(tmp_repo)) == []
 
     def test_report_is_sorted_and_codes_registered(self, tmp_repo: Path) -> None:
         setup_repo(tmp_repo)
         write_doc(tmp_repo, make_document(doc_type="nonexistent-type"))
-        write_doc(tmp_repo, make_document("RE-BBBBBB"), body="No heading.\n")
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB"), body="No heading.\n")
         findings = validate_workspace(Workspace.open(tmp_repo))
         keys = [(f.code, str(f.subject), f.message) for f in findings]
         assert keys == sorted(keys)
@@ -672,7 +712,9 @@ class TestValidateWorkspace:
 class TestSeverityAggregation:
     @staticmethod
     def _finding(code: str, severity: str) -> Finding:
-        return Finding(code=code, severity=severity, subject="RE-AAAAAA", message="m")
+        return Finding(
+            code=code, severity=severity, subject="RE-STORY-AAAAAA", message="m"
+        )
 
     def test_empty_report(self) -> None:
         assert aggregate_severity([]) is None
@@ -697,13 +739,13 @@ class TestReportPayload:
         setup_repo(tmp_repo)
         write_doc(
             tmp_repo,
-            make_document(links=[("relates-to", "RE-BBBBBB")]),
+            make_document(links=[("relates-to", "RE-STORY-BBBBBB")]),
             body=(
                 "## Story\n\nAs a user, I want uploads.\n\n"
                 "## Acceptance criteria\n\nGiven a file, then stored.\n"
             ),
         )
-        write_doc(tmp_repo, make_document("RE-BBBBBB", doc_type="nope"))
+        write_doc(tmp_repo, make_document("RE-STORY-BBBBBB", doc_type="nope"))
         payload = report_payload(validate_workspace(Workspace.open(tmp_repo)))
         assert {item["code"] for item in payload} == {
             "E-TITLE-MISSING",
@@ -714,7 +756,7 @@ class TestReportPayload:
             assert {"code", "severity", "message"} <= set(item)
             assert ("id" in item) != ("path" in item)
         by_code = {item["code"]: item for item in payload}
-        assert by_code["E-TITLE-MISSING"]["id"] == "RE-AAAAAA"
+        assert by_code["E-TITLE-MISSING"]["id"] == "RE-STORY-AAAAAA"
         assert by_code["E-TITLE-MISSING"]["fix"].startswith("gregraph edit")
         assert "fix" not in by_code["E-TYPE-UNKNOWN"]
 

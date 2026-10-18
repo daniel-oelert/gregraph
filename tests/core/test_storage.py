@@ -62,7 +62,7 @@ CREATED = dt.datetime(2026, 9, 10, 14, 2, 11, tzinfo=UTC)
 
 
 def make_document(
-    doc_id: str = "RE-7F3K2Q",
+    doc_id: str = "RE-STORY-7F3K2Q",
     links: list[Link] | None = None,
 ) -> Document:
     return Document(
@@ -79,8 +79,8 @@ def make_document(
         assets=[AssetRef(path="upload-flow.png", hash="sha256:41ab")],
         links=links
         or [
-            Link(type="depends-on", target="RE-9PZ0AH", target_version=1),
-            Link(type="refines", target="RE-2K7QMB", target_version=4),
+            Link(type="depends-on", target="RE-FEAT-9PZ0AH", target_version=1),
+            Link(type="refines", target="RE-FEAT-2K7QMB", target_version=4),
         ],
         deprecated=None,
         tags=["upload"],
@@ -92,7 +92,7 @@ def make_change_request() -> ChangeRequest:
     return ChangeRequest(
         schema=1,
         uuid=uuid.UUID("0b9e7c1a-3d2f-4e8b-9a61-5c4d2e1f0a77"),
-        id="RE-3M9XA1",
+        id="RE-CHG-3M9XA1",
         title="Raise knowledge-base upload limit to 200 MB",
         created=CREATED,
         created_by=None,
@@ -101,10 +101,10 @@ def make_change_request() -> ChangeRequest:
         body_hash="sha256:aa11",
         scope_hash="sha256:bb22",
         scope=[
-            ScopeEntry(id="RE-9PZ0AH", intent="supersede", base_version=1),
-            ScopeEntry(id="RE-7F3K2Q", intent="modify", base_version=3),
+            ScopeEntry(id="RE-FEAT-9PZ0AH", intent="supersede", base_version=1),
+            ScopeEntry(id="RE-STORY-7F3K2Q", intent="modify", base_version=3),
         ],
-        introduces=["RE-Q4M2ZT", "RE-A1B2C3"],
+        introduces=["RE-FEAT-Q4M2ZT", "RE-FEAT-A1B2C3"],
         status="accepted",
         decisions=[
             Decision(
@@ -154,16 +154,19 @@ def test_templates_dir(tmp_repo: Path) -> None:
 
 
 def test_document_paths(tmp_repo: Path) -> None:
-    body, sidecar = document_paths(tmp_repo, "user-stories", "RE-7F3K2Q")
-    assert body == tmp_repo / "documents" / "user-stories" / "RE-7F3K2Q.md"
-    assert sidecar == tmp_repo / "documents" / "user-stories" / "RE-7F3K2Q.json"
-    assert assets_dir(tmp_repo, "RE-7F3K2Q") == tmp_repo / "assets" / "RE-7F3K2Q"
+    body, sidecar = document_paths(tmp_repo, "user-stories", "RE-STORY-7F3K2Q")
+    assert body == tmp_repo / "documents" / "user-stories" / "RE-STORY-7F3K2Q.md"
+    assert sidecar == tmp_repo / "documents" / "user-stories" / "RE-STORY-7F3K2Q.json"
+    assert (
+        assets_dir(tmp_repo, "RE-STORY-7F3K2Q")
+        == tmp_repo / "assets" / "RE-STORY-7F3K2Q"
+    )
 
 
 def test_change_paths(tmp_repo: Path) -> None:
-    body, sidecar = change_paths(tmp_repo, "RE-3M9XA1")
-    assert body == tmp_repo / "changes" / "RE-3M9XA1.md"
-    assert sidecar == tmp_repo / "changes" / "RE-3M9XA1.json"
+    body, sidecar = change_paths(tmp_repo, "RE-CHG-3M9XA1")
+    assert body == tmp_repo / "changes" / "RE-CHG-3M9XA1.md"
+    assert sidecar == tmp_repo / "changes" / "RE-CHG-3M9XA1.json"
 
 
 def test_term_paths(tmp_repo: Path) -> None:
@@ -173,16 +176,16 @@ def test_term_paths(tmp_repo: Path) -> None:
 
 
 def test_find_document_scans_all_folders(tmp_repo: Path) -> None:
-    body, sidecar = document_paths(tmp_repo, "user-stories", "RE-7F3K2Q")
+    body, sidecar = document_paths(tmp_repo, "user-stories", "RE-STORY-7F3K2Q")
     body.parent.mkdir(parents=True)
     body.write_text("# Title\n", encoding="utf-8")
     sidecar.write_text("{}", encoding="utf-8")
-    found = find_document(tmp_repo, "RE-7F3K2Q")
+    found = find_document(tmp_repo, "RE-STORY-7F3K2Q")
     assert found is not None
-    assert found.stem == "RE-7F3K2Q"
+    assert found.stem == "RE-STORY-7F3K2Q"
     assert found.body == body
     assert found.sidecar == sidecar
-    assert find_document(tmp_repo, "RE-NOPE") is None
+    assert find_document(tmp_repo, "RE-STORY-ZZZZZZ") is None
 
 
 def test_find_document_nested_folder(tmp_repo: Path) -> None:
@@ -196,19 +199,19 @@ def test_find_document_nested_folder(tmp_repo: Path) -> None:
 
 
 def test_find_change_and_term(tmp_repo: Path) -> None:
-    cr_body, cr_sidecar = change_paths(tmp_repo, "RE-3M9XA1")
+    cr_body, cr_sidecar = change_paths(tmp_repo, "RE-CHG-3M9XA1")
     cr_body.write_text("# CR\n", encoding="utf-8")
     cr_sidecar.write_text("{}", encoding="utf-8")
     term_body, term_sidecar = term_paths(tmp_repo, "knowledge-base")
     term_body.write_text("# Knowledge base\n", encoding="utf-8")
     term_sidecar.write_text("{}", encoding="utf-8")
-    found_cr = find_change(tmp_repo, "RE-3M9XA1")
+    found_cr = find_change(tmp_repo, "RE-CHG-3M9XA1")
     assert found_cr is not None
     assert (found_cr.body, found_cr.sidecar) == (cr_body, cr_sidecar)
     found_term = find_term(tmp_repo, "knowledge-base")
     assert found_term is not None
     assert (found_term.body, found_term.sidecar) == (term_body, term_sidecar)
-    assert find_change(tmp_repo, "RE-NOPE") is None
+    assert find_change(tmp_repo, "RE-STORY-ZZZZZZ") is None
     assert find_term(tmp_repo, "nope") is None
 
 
@@ -335,7 +338,7 @@ def test_canonical_json_hypothesis_key_order_invariant(payload: dict[str, Any]) 
 
 
 def test_document_round_trip(tmp_repo: Path) -> None:
-    body, sidecar = document_paths(tmp_repo, "user-stories", "RE-7F3K2Q")
+    body, sidecar = document_paths(tmp_repo, "user-stories", "RE-STORY-7F3K2Q")
     document = make_document()
     write_sidecar(sidecar, document)
     assert read_sidecar(sidecar, Document) == document
@@ -363,12 +366,12 @@ def test_document_canonicalises_links(tmp_repo: Path) -> None:
 
 
 def test_change_request_round_trip(tmp_repo: Path) -> None:
-    _, sidecar = change_paths(tmp_repo, "RE-3M9XA1")
+    _, sidecar = change_paths(tmp_repo, "RE-CHG-3M9XA1")
     cr = make_change_request()
     write_sidecar(sidecar, cr)
     loaded = read_sidecar(sidecar, ChangeRequest)
-    assert [entry.id for entry in loaded.scope] == ["RE-7F3K2Q", "RE-9PZ0AH"]
-    assert loaded.introduces == ["RE-A1B2C3", "RE-Q4M2ZT"]
+    assert [entry.id for entry in loaded.scope] == ["RE-FEAT-9PZ0AH", "RE-STORY-7F3K2Q"]
+    assert loaded.introduces == ["RE-FEAT-A1B2C3", "RE-FEAT-Q4M2ZT"]
     once = sidecar.read_bytes()
     write_sidecar(sidecar, loaded)
     assert sidecar.read_bytes() == once
@@ -382,7 +385,7 @@ def test_term_round_trip(tmp_repo: Path) -> None:
 
 
 def test_sidecar_file_bytes_are_canonical(tmp_repo: Path) -> None:
-    _, sidecar = document_paths(tmp_repo, "features", "RE-7F3K2Q")
+    _, sidecar = document_paths(tmp_repo, "features", "RE-STORY-7F3K2Q")
     sidecar.parent.mkdir(parents=True)
     document = make_document()
     write_sidecar(sidecar, document)
@@ -399,7 +402,7 @@ def test_sidecar_file_bytes_are_canonical(tmp_repo: Path) -> None:
 
 
 def test_body_round_trip(tmp_repo: Path) -> None:
-    body, _ = document_paths(tmp_repo, "features", "RE-7F3K2Q")
+    body, _ = document_paths(tmp_repo, "features", "RE-STORY-7F3K2Q")
     body.parent.mkdir(parents=True)
     text = "# Title\n\nBody text.\n"
     write_body(body, text)
@@ -425,7 +428,7 @@ def test_read_body_strips_bom(tmp_repo: Path) -> None:
 
 
 def test_read_body_missing_raises(tmp_repo: Path) -> None:
-    body, _ = document_paths(tmp_repo, "features", "RE-NOPE")
+    body, _ = document_paths(tmp_repo, "features", "RE-STORY-ZZZZZZ")
     with pytest.raises(FileNotFoundError):
         read_body(body)
 
@@ -447,7 +450,7 @@ def test_cache_round_trip(tmp_repo: Path) -> None:
     loaded = load_cache(tmp_repo)
     assert loaded == cache
     assert loaded.schema_ == 1
-    assert loaded.tool_version == "0.1.1"
+    assert loaded.tool_version == "0.2.0"
 
 
 def test_cache_absent_rebuilds_silently(tmp_repo: Path) -> None:
@@ -516,9 +519,9 @@ def _symlink(link: Path, target: Path, *, is_dir: bool = False) -> None:
 
 def test_managed_path_returns_absolute_inside_root(tmp_repo: Path) -> None:
     (tmp_repo / "documents" / "user-story").mkdir(parents=True)
-    body = tmp_repo / "documents" / "user-story" / "RE-7F3K2Q.md"
+    body = tmp_repo / "documents" / "user-story" / "RE-STORY-7F3K2Q.md"
     body.write_text("# A\n", encoding="utf-8")
-    rel = Path("documents/user-story/RE-7F3K2Q.md")
+    rel = Path("documents/user-story/RE-STORY-7F3K2Q.md")
 
     resolved = managed_path(tmp_repo, rel)
 
@@ -527,7 +530,7 @@ def test_managed_path_returns_absolute_inside_root(tmp_repo: Path) -> None:
 
 
 def test_managed_path_allows_missing_final_file(tmp_repo: Path) -> None:
-    rel = Path("documents/user-story/RE-7F3K2Q.json")
+    rel = Path("documents/user-story/RE-STORY-7F3K2Q.json")
     assert managed_path(tmp_repo, rel) == tmp_repo / rel
 
 
@@ -549,10 +552,10 @@ def test_managed_path_rejects_symlink_file_inside_root(tmp_repo: Path) -> None:
     folder = tmp_repo / "documents" / "user-story"
     folder.mkdir(parents=True)
     (folder / "real.md").write_text("# A\n", encoding="utf-8")
-    _symlink(folder / "RE-7F3K2Q.md", folder / "real.md")
+    _symlink(folder / "RE-STORY-7F3K2Q.md", folder / "real.md")
 
     with pytest.raises(UnsafePathError):
-        managed_path(tmp_repo, Path("documents/user-story/RE-7F3K2Q.md"))
+        managed_path(tmp_repo, Path("documents/user-story/RE-STORY-7F3K2Q.md"))
 
 
 def test_managed_path_rejects_symlink_file_outside_root(
@@ -562,10 +565,10 @@ def test_managed_path_rejects_symlink_file_outside_root(
     outside.write_text("# Outside\n", encoding="utf-8")
     folder = tmp_repo / "documents" / "user-story"
     folder.mkdir(parents=True)
-    _symlink(folder / "RE-7F3K2Q.md", outside)
+    _symlink(folder / "RE-STORY-7F3K2Q.md", outside)
 
     with pytest.raises(UnsafePathError):
-        managed_path(tmp_repo, Path("documents/user-story/RE-7F3K2Q.md"))
+        managed_path(tmp_repo, Path("documents/user-story/RE-STORY-7F3K2Q.md"))
 
 
 def test_managed_path_rejects_symlink_directory_component(
@@ -573,7 +576,7 @@ def test_managed_path_rejects_symlink_directory_component(
 ) -> None:
     """A link directory below the root is refused even when it points inside."""
     (tmp_repo / "documents" / "real").mkdir(parents=True)
-    (tmp_repo / "documents" / "real" / "RE-7F3K2Q.md").write_text(
+    (tmp_repo / "documents" / "real" / "RE-STORY-7F3K2Q.md").write_text(
         "# A\n", encoding="utf-8"
     )
     _symlink(
@@ -583,9 +586,9 @@ def test_managed_path_rejects_symlink_directory_component(
     _symlink(tmp_repo / "documents" / "escape", outside, is_dir=True)
 
     with pytest.raises(UnsafePathError):
-        managed_path(tmp_repo, Path("documents/alias/RE-7F3K2Q.md"))
+        managed_path(tmp_repo, Path("documents/alias/RE-STORY-7F3K2Q.md"))
     with pytest.raises(UnsafePathError):
-        managed_path(tmp_repo, Path("documents/escape/RE-7F3K2Q.md"))
+        managed_path(tmp_repo, Path("documents/escape/RE-STORY-7F3K2Q.md"))
 
 
 def test_managed_path_accepts_symlinked_root(
@@ -593,7 +596,7 @@ def test_managed_path_accepts_symlinked_root(
 ) -> None:
     """The root itself may be reached through a link; only components below it count."""
     (tmp_repo / "documents" / "user-story").mkdir(parents=True)
-    rel = Path("documents/user-story/RE-7F3K2Q.md")
+    rel = Path("documents/user-story/RE-STORY-7F3K2Q.md")
     (tmp_repo / rel).write_text("# A\n", encoding="utf-8")
     alias_root = tmp_path_factory.mktemp("alias") / "repo-link"
     _symlink(alias_root, tmp_repo, is_dir=True)

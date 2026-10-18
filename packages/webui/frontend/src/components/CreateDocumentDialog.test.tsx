@@ -117,7 +117,7 @@ describe("CreateDocumentDialog while a create request is pending", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: "Create document" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
-    pending.resolve({ id: "RE-NEW001", notices: [], findings: [] });
+    pending.resolve({ id: "RE-FEAT-NEW001", notices: [], findings: [] });
   });
 
   it("ignores a second submit while the first request is pending", async () => {
@@ -132,7 +132,7 @@ describe("CreateDocumentDialog while a create request is pending", () => {
     form.requestSubmit();
 
     expect(api.createDocument).toHaveBeenCalledTimes(1);
-    pending.resolve({ id: "RE-NEW001", notices: [], findings: [] });
+    pending.resolve({ id: "RE-FEAT-NEW001", notices: [], findings: [] });
   });
 
   it("a settled create closes through onCreated with the new id", async () => {
@@ -144,10 +144,10 @@ describe("CreateDocumentDialog while a create request is pending", () => {
     await user.click(screen.getByRole("button", { name: "Open" }));
 
     await fillAndSubmit(user);
-    pending.resolve({ id: "RE-NEW001", notices: [], findings: [] });
+    pending.resolve({ id: "RE-FEAT-NEW001", notices: [], findings: [] });
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create document" })).toBeNull());
-    expect(onCreated).toHaveBeenCalledWith("RE-NEW001");
+    expect(onCreated).toHaveBeenCalledWith("RE-FEAT-NEW001");
   });
 
   it("a failed create clears busy, keeps the dialog, and then Escape closes and restores focus", async () => {

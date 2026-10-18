@@ -99,7 +99,7 @@ def test_edit_unknown_id_refused(
     sample_graph: SampleGraph, monkeypatch, tmp_path: Path, capsys
 ) -> None:
     recorder_editor(tmp_path, monkeypatch)
-    assert main(["--repo", str(sample_graph.root), "edit", "RE-NOSUCH"]) == 4
+    assert main(["--repo", str(sample_graph.root), "edit", "RE-STORY-ZZZZZZ"]) == 4
     assert "E-ID-UNKNOWN" in capsys.readouterr().err
 
 

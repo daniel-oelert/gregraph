@@ -77,6 +77,21 @@ def test_init_layout_and_config(tmp_path: Path) -> None:
     assert ".gregraph/" in readme
 
 
+def test_legacy_config_is_exit_3_with_migration_hint(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = tmp_path / ".gregraph" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        '[gregraph]\nconfig_schema = 1\ntool_version = "0.1.1"\n',
+        encoding="utf-8",
+    )
+    assert main(["--repo", str(tmp_path), "validate"]) == 3
+    captured = capsys.readouterr()
+    assert "migrate_type_ids" in captured.err
+    assert captured.out == ""
+
+
 def test_init_copies_all_builtin_templates(tmp_path: Path) -> None:
     target = tmp_path / "repo"
     assert main(["init", str(target), "--no-git"]) == 0
@@ -227,7 +242,7 @@ def test_m1_init_then_new_writes_valid_pair(tmp_path: Path, capsys) -> None:
     assert document.id == body.stem
     assert document.title == "Upload from the desktop"
     assert document.type == "user-story"
-    assert is_derivable_from(document.id, document.uuid, "RE")
+    assert is_derivable_from(document.id, document.uuid, "RE", "STORY")
     text = body.read_text(encoding="utf-8")
     assert text.splitlines()[0] == "# Upload from the desktop"
     assert document.body_hash == body_hash(text)

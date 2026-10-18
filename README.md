@@ -22,7 +22,10 @@ first-class home — all offline, all plain text, all through one CLI.
   (`gregraph serve`) is the one exception: a foreground process that listens on
   loopback only and is never remote.
 
-GREGraph v0.1.0 implements the design in [`docs/design.md`](docs/design.md).
+GREGraph v0.2.0 implements the design in [`docs/design.md`](docs/design.md).
+Identifiers are typed — `<PREFIX>-<ABBREVIATION>-<body>`, for example
+`RE-FEAT-7F3K2Q` — with one abbreviation per document type and the fixed
+`CHG` abbreviation for change requests.
 
 ## Requirements
 
@@ -71,21 +74,38 @@ gregraph init my-requirements        # create a requirements repository
 cd my-requirements
 
 gregraph new user-story --title "As a user I can reset my password"
-gregraph new feature --title "Password reset" --link refines:RE-XXXXXX
-gregraph link RE-XXXXXX depends-on RE-YYYYYY
+gregraph new feature --title "Password reset" --link refines:RE-FEAT-7F3K2Q
+gregraph link RE-STORY-3M9XA1 depends-on RE-FEAT-7F3K2Q
 
-gregraph show RE-XXXXXX              # fields, links, impact
+gregraph show RE-STORY-3M9XA1        # fields, links, impact
 gregraph status                      # WIP, drafts, outdated links, CRs
 gregraph validate                    # full check (CI: gregraph validate --strict)
 gregraph graph -o graph.md           # Mermaid flowchart export
 
 git add . && git commit              # hook bumps versions, blocks broken links
-gregraph baseline create 0.1.0       # tag a named accepted state
+gregraph baseline create 0.2.0       # tag a named accepted state
 ```
 
 Run without arguments or with `--help` for the full command tree. Most
 commands prompt for missing arguments when on a terminal and accept flag
 equivalents for scripting (`--no-input` disables prompting entirely).
+
+## Migrating from 0.1
+
+Version 0.2 uses typed IDs and config schema 2. An existing schema-1
+repository is refused with exit 3 until it is migrated once with the
+standalone script (dry-run by default, `--apply` to write):
+
+```
+python scripts/migrate_type_ids.py
+python scripts/migrate_type_ids.py --apply
+```
+
+The migration preserves document versions, link `target_version` values and
+CR `base_version` values, recomputes hashes, and rewrites old two-segment IDs
+without leaving aliases. Read
+[`docs/migration-typed-ids.md`](docs/migration-typed-ids.md) before running it
+on a shared repository.
 
 ## Documentation
 
@@ -95,6 +115,7 @@ equivalents for scripting (`--no-input` disables prompting entirely).
 | [`docs/cli.md`](docs/cli.md) | Every command, flag, exit code and interactive behaviour. |
 | [`docs/webui.md`](docs/webui.md) | The optional local web UI: install, `serve`, security model, saving, development. |
 | [`docs/concepts.md`](docs/concepts.md) | The model for humans: documents, the graph, versions, status, change requests. |
+| [`docs/migration-typed-ids.md`](docs/migration-typed-ids.md) | Upgrading a pre-0.2 repository to typed document IDs (config schema 2). |
 | [`docs/decisions.md`](docs/decisions.md) | Design decision log and implementation decisions. |
 | [`docs/backlog.md`](docs/backlog.md) | Open spec questions and v0.2 ideas. |
 | [`AGENTS.md`](AGENTS.md) | Contributor guide for working on the tool itself. |

@@ -21,14 +21,16 @@ class FakeTTY(io.StringIO):
 
 ROWS = [
     PickRow(
-        key="RE-AAAAAA",
+        key="RE-STORY-AAAAAA",
         type="user-story",
         title="Upload from the desktop",
         status="active",
     ),
-    PickRow(key="RE-BBBBBB", type="feature", title="Upload documents", status="draft"),
     PickRow(
-        key="RE-CCCCCC", type="assumption", title="Modern browsers", status="active"
+        key="RE-FEAT-BBBBBB", type="feature", title="Upload documents", status="draft"
+    ),
+    PickRow(
+        key="RE-ASM-CCCCCC", type="assumption", title="Modern browsers", status="active"
     ),
 ]
 
@@ -54,42 +56,42 @@ def run_pick(
 def test_pick_accepts_number() -> None:
     chosen, display = run_pick("2\n")
     assert chosen is not None
-    assert chosen.key == "RE-BBBBBB"
-    assert "RE-AAAAAA" in display
+    assert chosen.key == "RE-FEAT-BBBBBB"
+    assert "RE-STORY-AAAAAA" in display
     assert "Upload from the desktop" in display
 
 
 def test_pick_accepts_exact_id_case_insensitive() -> None:
-    chosen, _ = run_pick("re-cccccc\n")
+    chosen, _ = run_pick("re-asm-cccccc\n")
     assert chosen is not None
-    assert chosen.key == "RE-CCCCCC"
+    assert chosen.key == "RE-ASM-CCCCCC"
 
 
 def test_pick_filter_refines_then_number_selects() -> None:
     chosen, display = run_pick("upload\n1\n")
     assert chosen is not None
-    assert chosen.key == "RE-AAAAAA"
-    assert display.count("RE-BBBBBB") == 2
-    assert display.count("RE-CCCCCC") == 1
+    assert chosen.key == "RE-STORY-AAAAAA"
+    assert display.count("RE-FEAT-BBBBBB") == 2
+    assert display.count("RE-ASM-CCCCCC") == 1
 
 
 def test_pick_filter_matches_type_title_status_columns() -> None:
     chosen, _ = run_pick("draft\n1\n")
     assert chosen is not None
-    assert chosen.key == "RE-BBBBBB"
+    assert chosen.key == "RE-FEAT-BBBBBB"
 
 
 def test_pick_filter_no_matches_redisplays_full_list() -> None:
     chosen, display = run_pick("zzz\n3\n")
     assert chosen is not None
-    assert chosen.key == "RE-CCCCCC"
-    assert display.count("RE-AAAAAA") >= 2
+    assert chosen.key == "RE-ASM-CCCCCC"
+    assert display.count("RE-STORY-AAAAAA") >= 2
 
 
 def test_pick_exact_id_beats_filter_and_works_after_refining() -> None:
-    chosen, _ = run_pick("upload\nRE-CCCCCC\n")
+    chosen, _ = run_pick("upload\nRE-ASM-CCCCCC\n")
     assert chosen is not None
-    assert chosen.key == "RE-CCCCCC"
+    assert chosen.key == "RE-ASM-CCCCCC"
 
 
 def test_pick_q_cancels() -> None:
@@ -107,20 +109,20 @@ def test_pick_eof_cancels() -> None:
 def test_pick_invalid_number_reprompts() -> None:
     chosen, display = run_pick("9\n1\n")
     assert chosen is not None
-    assert chosen.key == "RE-AAAAAA"
+    assert chosen.key == "RE-STORY-AAAAAA"
     assert "invalid" in display
 
 
 def test_pick_empty_line_reprompts() -> None:
     chosen, _ = run_pick("\n2\n")
     assert chosen is not None
-    assert chosen.key == "RE-BBBBBB"
+    assert chosen.key == "RE-FEAT-BBBBBB"
 
 
 def test_pick_displays_numbered_columns() -> None:
     _, display = run_pick("q\n")
     assert "1." in display
-    assert "RE-AAAAAA" in display
+    assert "RE-STORY-AAAAAA" in display
     assert "user-story" in display
     assert "active" in display
 
@@ -128,7 +130,7 @@ def test_pick_displays_numbered_columns() -> None:
 def test_pick_single_row_via_number() -> None:
     chosen, _ = run_pick("1\n", rows=[ROWS[1]])
     assert chosen is not None
-    assert chosen.key == "RE-BBBBBB"
+    assert chosen.key == "RE-FEAT-BBBBBB"
 
 
 # --------------------------------------------------------------------------

@@ -44,7 +44,7 @@ def repo(tmp_path: Path) -> Path:
     (tmp_path / "assets").mkdir()
     (tmp_path / "documents" / "A.md").write_text("A body\n", encoding="utf-8")
     (tmp_path / "changes" / "CR-1.md").write_text("CR body\n", encoding="utf-8")
-    (tmp_path / "changes" / "CR-1.json").write_bytes(b'{"id": "RE-000001"}\n')
+    (tmp_path / "changes" / "CR-1.json").write_bytes(b'{"id": "RE-FEAT-000001"}\n')
     (tmp_path / "assets" / "blob.bin").write_bytes(b"\x00\x01\xfe\xff")
     _commit_all(tmp_path, "init")
     return tmp_path
@@ -246,17 +246,17 @@ class TestFilesAt:
 
     def test_loads_baseline_sidecars(self, repo: Path) -> None:
         files = GitAdapter(repo).files_at("HEAD", Path("changes"))
-        assert files[Path("changes/CR-1.json")] == b'{"id": "RE-000001"}\n'
+        assert files[Path("changes/CR-1.json")] == b'{"id": "RE-FEAT-000001"}\n'
 
     def test_empty_for_missing_prefix(self, repo: Path) -> None:
         assert GitAdapter(repo).files_at("HEAD", Path("glossary")) == {}
 
     def test_reads_a_branch_view(self, repo: Path) -> None:
         _git(repo, "branch", "baseline")
-        (repo / "changes" / "CR-1.json").write_bytes(b'{"id": "RE-000002"}\n')
+        (repo / "changes" / "CR-1.json").write_bytes(b'{"id": "RE-FEAT-000002"}\n')
         _commit_all(repo, "edit sidecar")
         files = GitAdapter(repo).files_at("baseline", Path("changes"))
-        assert files[Path("changes/CR-1.json")] == b'{"id": "RE-000001"}\n'
+        assert files[Path("changes/CR-1.json")] == b'{"id": "RE-FEAT-000001"}\n'
 
     def test_raises_for_missing_ref(self, repo: Path) -> None:
         with pytest.raises(subprocess.CalledProcessError):

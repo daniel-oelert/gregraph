@@ -20,7 +20,7 @@ from gregraph.core.config import Config, dumps_toml
 
 
 def test_version_attribute() -> None:
-    assert gregraph.__version__ == "0.1.1"
+    assert gregraph.__version__ == "0.2.0"
 
 
 def test_version_consistent_across_packaging_and_config() -> None:
@@ -36,7 +36,7 @@ def test_main_version(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as excinfo:
         main(["--version"])
     assert excinfo.value.code == 0
-    assert capsys.readouterr().out.strip() == "0.1.1"
+    assert capsys.readouterr().out.strip() == "0.2.0"
 
 
 def test_python_dash_m_version() -> None:
@@ -46,7 +46,7 @@ def test_python_dash_m_version() -> None:
         capture_output=True,
         text=True,
     )
-    assert result.stdout.strip() == "0.1.1"
+    assert result.stdout.strip() == "0.2.0"
 
 
 def test_console_script_entry_point() -> None:

@@ -359,7 +359,7 @@ def test_second_put_with_the_same_base_hash_is_refused(
 
 def test_put_body_unknown_id_is_404(client: TestClient, token: str) -> None:
     response = client.put(
-        "/api/documents/RE-ZZZZZZ/body",
+        "/api/documents/RE-STORY-ZZZZZZ/body",
         json={"text": "# X\n", "base_hash": "sha256:" + "0" * 64},
         headers=auth(token),
     )
@@ -552,7 +552,7 @@ def test_refusals_map_to_status_by_code(
 ) -> None:
     def refuse(*args: object, **kwargs: object) -> object:
         raise OperationRefused(
-            Finding(code=code, severity="E", subject="RE-ABCDEF", message="no")
+            Finding(code=code, severity="E", subject="RE-STORY-ABCDEF", message="no")
         )
 
     monkeypatch.setattr(operations, "list_documents", refuse)
@@ -563,7 +563,7 @@ def test_refusals_map_to_status_by_code(
     error = response.json()["error"]
     assert error["code"] == code
     assert error["severity"] == "E"
-    assert error["doc_id"] == "RE-ABCDEF"
+    assert error["doc_id"] == "RE-STORY-ABCDEF"
     assert error["path"] is None
 
 
@@ -623,7 +623,7 @@ def test_unknown_api_route_is_json_404_not_the_index(client: TestClient) -> None
 
 
 def test_wrong_method_is_json_405(client: TestClient) -> None:
-    response = client.get("/api/links/RE-ABCDEF/refines/RE-ABCDEF")
+    response = client.get("/api/links/RE-STORY-ABCDEF/refines/RE-STORY-ABCDEF")
 
     assert response.status_code == 405
     assert error_code(response) == "E-METHOD-NOT-ALLOWED"

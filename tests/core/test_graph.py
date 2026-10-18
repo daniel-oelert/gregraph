@@ -149,7 +149,7 @@ class TestBuildGraph:
         document = Document(
             schema=1,
             uuid=DOC_UUID,
-            id="RE-AAAAAA",
+            id="RE-STORY-AAAAAA",
             type="user-story",
             title="Story",
             created=CREATED,
@@ -159,8 +159,8 @@ class TestBuildGraph:
             body_hash=body_hash("# Story\n"),
             assets=[],
             links=[
-                Link(type="refines", target="RE-BBBBBB", target_version=1),
-                Link(type="relates-to", target="RE-CCCCCC", target_version=1),
+                Link(type="refines", target="RE-STORY-BBBBBB", target_version=1),
+                Link(type="relates-to", target="RE-STORY-CCCCCC", target_version=1),
             ],
             deprecated=None,
             tags=[],
@@ -168,18 +168,18 @@ class TestBuildGraph:
         )
         kinds: dict[str, Kind] = {"user-story": "requirement"}
         g = build_graph([document], kinds)
-        assert g.kind_of("RE-AAAAAA") == "requirement"
-        assert g.title_of("RE-AAAAAA") == "Story"
+        assert g.kind_of("RE-STORY-AAAAAA") == "requirement"
+        assert g.title_of("RE-STORY-AAAAAA") == "Story"
         assert set(g.edges) == {
-            edge("RE-AAAAAA", "refines", "RE-BBBBBB"),
-            edge("RE-AAAAAA", "relates-to", "RE-CCCCCC"),
+            edge("RE-STORY-AAAAAA", "refines", "RE-STORY-BBBBBB"),
+            edge("RE-STORY-AAAAAA", "relates-to", "RE-STORY-CCCCCC"),
         }
 
     def test_unknown_type_has_no_kind(self) -> None:
         document = Document(
             schema=1,
             uuid=DOC_UUID,
-            id="RE-AAAAAA",
+            id="RE-STORY-AAAAAA",
             type="mystery",
             title="Story",
             created=CREATED,
@@ -194,7 +194,7 @@ class TestBuildGraph:
             extra={},
         )
         g = build_graph([document], {})
-        assert g.kind_of("RE-AAAAAA") is None
+        assert g.kind_of("RE-STORY-AAAAAA") is None
 
 
 class TestCheckLinkKinds:
@@ -921,7 +921,7 @@ def test_perf_smoke_5000_nodes(tmp_path: Path) -> None:
     folder = "perf"
     n = 5000
     uuids = [UUID(int=i << 98) for i in range(1, n + 1)]
-    ids = [derive_id(u) for u in uuids]
+    ids = [derive_id(u, "RE", "FEAT") for u in uuids]
     assert len(set(ids)) == n
     for i, doc_id in enumerate(ids):
         links = (

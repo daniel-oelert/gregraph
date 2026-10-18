@@ -26,39 +26,39 @@ if TYPE_CHECKING:
 GOLDEN_DEFAULT = """\
 ```mermaid
 flowchart TD
-RE000001(["RE-000001<br/>Increase self-service"])
-RE000002(["RE-000002<br/>Meet GDPR"])
-RE000003(["RE-000003<br/>Knowledge base"])
-RE000004["RE-000004<br/>Upload documents"]
-RE000005["RE-000005<br/>Upload from the desktop"]
-RE000007["RE-000007<br/>Scan uploads for malware"]
-RE000008["RE-000008<br/>Pipeline rejects infected files"]
-RE000009["RE-000009<br/>P95 upload latency under 3 s"]
-RE00000A[["RE-00000A<br/>Ingestion pipeline"]]
-RE00000B{{"RE-00000B<br/>Upload happy path"}}
-RE00000C>"RE-00000C<br/>Anna the compliance officer"]
-RE00000D>"RE-00000D<br/>Users have modern browsers"]
-RE000002 -- conflicts-with --- RE00000A
-RE000003 --> RE000001
-RE000004 --> RE000003
-RE000005 --> RE000004
-RE000007 -.-> RE000004
-RE000008 ==> RE000005
-RE000008 --> RE000007
-RE000009 -- constrains --> RE000004
-RE00000A -- satisfies --> RE000004
-RE00000B -- verifies --> RE000005
-RE00000B -- verifies --> RE00000A
-linkStyle 0 stroke:#ff0000
+REASM00000D>"RE-ASM-00000D<br/>Users have modern browsers"]
+REDSGN00000A[["RE-DSGN-00000A<br/>Ingestion pipeline"]]
+REEPIC000003(["RE-EPIC-000003<br/>Knowledge base"])
+REFEAT000004["RE-FEAT-000004<br/>Upload documents"]
+REFUNC000008["RE-FUNC-000008<br/>Pipeline rejects infected files"]
+REGOAL000001(["RE-GOAL-000001<br/>Increase self-service"])
+REGOAL000002(["RE-GOAL-000002<br/>Meet GDPR"])
+RENFR000009["RE-NFR-000009<br/>P95 upload latency under 3 s"]
+RESTKH00000C>"RE-STKH-00000C<br/>Anna the compliance officer"]
+RESTORY000005["RE-STORY-000005<br/>Upload from the desktop"]
+RESTORY000007["RE-STORY-000007<br/>Scan uploads for malware"]
+RETEST00000B{{"RE-TEST-00000B<br/>Upload happy path"}}
+REDSGN00000A -- satisfies --> REFEAT000004
+REEPIC000003 --> REGOAL000001
+REFEAT000004 --> REEPIC000003
+REFUNC000008 ==> RESTORY000005
+REFUNC000008 --> RESTORY000007
+REGOAL000002 -- conflicts-with --- REDSGN00000A
+RENFR000009 -- constrains --> REFEAT000004
+RESTORY000005 --> REFEAT000004
+RESTORY000007 -.-> REFEAT000004
+RETEST00000B -- verifies --> REDSGN00000A
+RETEST00000B -- verifies --> RESTORY000005
+linkStyle 5 stroke:#ff0000
 ```
 """
 
 GOLDEN_ROOT_DEPTH_ONE = """\
 ```mermaid
 flowchart TD
-RE000001(["RE-000001<br/>Increase self-service"])
-RE000003(["RE-000003<br/>Knowledge base"])
-RE000003 --> RE000001
+REEPIC000003(["RE-EPIC-000003<br/>Knowledge base"])
+REGOAL000001(["RE-GOAL-000001<br/>Increase self-service"])
+REEPIC000003 --> REGOAL000001
 ```
 """
 
@@ -98,14 +98,14 @@ def test_graph_include_superseded_draws_stale_class(sample_graph: SampleGraph) -
 
 def test_graph_types_filter(sample_graph: SampleGraph) -> None:
     text = graph_text(sample_graph.root, "--types", "goal")
-    assert "RE000001" in text
-    assert "RE000002" in text
-    assert "RE000004" not in text  # feature (type feature) filtered out
+    assert "REGOAL000001" in text
+    assert "REGOAL000002" in text
+    assert "REFEAT000004" not in text  # feature (type feature) filtered out
 
 
 def test_graph_edges_filter(sample_graph: SampleGraph) -> None:
     text = graph_text(sample_graph.root, "--edges", "depends-on")
-    assert "RE000008 ==> RE000005" in text
+    assert "REFUNC000008 ==> RESTORY000005" in text
     assert "-->" not in text
     assert "conflicts-with" not in text
 
@@ -133,7 +133,10 @@ def test_graph_json_payload(sample_graph: SampleGraph) -> None:
 def test_graph_unknown_root_refused_exits_4(
     sample_graph: SampleGraph, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["--repo", str(sample_graph.root), "graph", "--root", "RE-NOSUCH"]) == 4
+    assert (
+        main(["--repo", str(sample_graph.root), "graph", "--root", "RE-STORY-ZZZZZZ"])
+        == 4
+    )
     assert "E-ID-UNKNOWN" in capsys.readouterr().err
 
 

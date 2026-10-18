@@ -29,6 +29,7 @@ in the backlog for the spec revision and the answer is recorded here.
 | D17 | Decision authority = merge into the baseline branch; proposed vs. effective status is shown, not warned; `cr.deciders` is advisory. | 9.3 |
 | D18 | Origin tracking as metadata (`origin_cr` / `introduces`), not edges. | 9.5 |
 | D19 | Both CR workflows (proposal-first, single-PR) supported, none enforced; CRs optional via `cr.enabled`. | 9.9 |
+| D20 | Typed IDs: `<PREFIX>-<ABBREVIATION>-<body>`, one required unique abbreviation per type, fixed reserved `CHG` for CRs; config schema 2 with a hard cutover and no aliases; standalone migration script; abbreviations immutable once used. (D-TYPED-IDS) | 4, 5.3, 7.2, 14 |
 
 Known open items for v0.2 are listed in `docs/backlog.md` (mirrored from the
 spec §20 closing note).
@@ -210,7 +211,7 @@ modules) to exit 5.
 ### D-PACKAGE-SPLIT
 
 Supersedes the single-distribution packaging of spec §16.4 by explicit user
-instruction (lockstep versions, currently 0.1.1). (1) Two distributions under
+instruction (lockstep versions, currently 0.2.0). (1) Two distributions under
 `packages/`: `gregraph-core` (library, runtime deps unchanged) and `gregraph-cli`
 (console script, `python -m gregraph`, depends on `gregraph-core==<same version>`).
 The import names `gregraph.core`, `gregraph.cli`, `from gregraph import __version__`
@@ -235,7 +236,7 @@ work; it is a development dependency only, not a new runtime dependency.
 Optional local web UI, specified by spec §21 (Amendment A1, revision 0.3,
 authorised 2026-10-14). It is an extension to the v0.1 scope, not a milestone,
 and carries no tag. (1) **Third distribution.** `gregraph-webui` lives in
-`packages/webui` and is versioned in lockstep (0.1.1). It is separate so that
+`packages/webui` and is versioned in lockstep (0.2.0). It is separate so that
 the two baseline distributions keep their runtime dependency set closed
 (D11, BOOT-201): `pydantic`, `jinja2`, `markdown-it-py` and `mdit-py-plugins` for
 core, nothing new for the CLI. Only `gregraph-webui` adds `fastapi` and
@@ -457,3 +458,45 @@ or parsed by the tool. Consequence: every new agent session reads the
 golden rules from the repository instead of re-deriving (or violating)
 them; `hooks install` deliberately does not touch agent files (single
 responsibility).
+
+### D-TYPED-IDS (typed document identifiers, 0.2.0)
+
+Implements spec r0.5 (design §4, §5.3, §7.2, §14; decision D20).
+(1) **Typed canonical form.** Every ID is
+`<PREFIX>-<ABBREVIATION>-<6-char Crockford body>` (e.g. `RE-FEAT-7F3K2Q`):
+the configured repository prefix, the type's abbreviation and the
+UUID-derived body. The body stays random; only the type segment is
+semantic. (2) **Per-type abbreviation.** Every configured document type
+declares a required `abbreviation` under `[types.<name>]`, matching
+`[A-Z]{3,5}` and unique across types. Change requests always use the fixed,
+reserved abbreviation `CHG` (`RE-CHG-3M9XA1`); `CHG` is not configurable and
+no document type may use it. The shipped mapping is context CTX, goal GOAL,
+epic EPIC, feature FEAT, user-story STORY, functional-requirement FUNC,
+non-functional-requirement NFR, constraint CON, design DSGN, decision DEC,
+test-case TEST, stakeholder STKH, assumption ASM; CR CHG. (3) **Immutability.**
+An abbreviation is fixed once any document of that type exists; changing it
+is `E-TYPE-ABBREVIATION-CHANGED`. The cache records the abbreviation (beside
+the kind) so the change is detectable, and an unchanged abbreviation is
+re-checked through `E-ID-DERIVATION` (prefix + abbreviation). A type with no
+documents may still be re-abbreviated. (4) **Schema 2 hard cutover.** Config
+schema becomes `2` (`config_schema = 2`); a schema-1 config is refused as an
+environment error (exit 3) telling the user to run
+`scripts/migrate_type_ids.py`. There is no dual-format period and no legacy
+alias: two-segment IDs are rejected everywhere, and a schema-2 repository
+that still contains one reports `E-ID-LEGACY`. (5) **Standalone migration
+only.** Migration ships as `scripts/migrate_type_ids.py`, dry-run by
+default, writing only with `--apply`, accepting custom-type
+`--abbreviation TYPE=ABBR` and `--map-out PATH`, working on schema-1 configs
+and deliberately **not importing gregraph** so it can run before the new
+tool is installed. No `gregraph` command performs the rewrite. (6)
+**Version-preservation rule.** The migration preserves every document/CR
+`version`, every link `target_version` and every CR scope `base_version`; it
+recomputes `body_hash`/`scope_hash` because identifier text changed. It is an
+identifier rewrite, not a semantic content change — the one documented case
+where a stored hash changes without a version bump. Old Git history and tags
+are not rewritten. (7) **Rejected alternatives.** A purely random
+type-agnostic ID (no type information), a configurable CR abbreviation, an
+in-tool migration command, and legacy aliases for old IDs. Consequence:
+humans and agents can tell a document's type from its ID, while the random
+body still guarantees stability and collision behaviour; upgrading an
+existing repository requires the documented one-time migration.

@@ -131,7 +131,7 @@ def test_show_downstream_depth_limit(sample_graph: SampleGraph) -> None:
 
 
 def test_show_unknown_id_refused(sample_graph: SampleGraph, capsys) -> None:
-    assert main(["--repo", str(sample_graph.root), "show", "RE-NOSUCH"]) == 4
+    assert main(["--repo", str(sample_graph.root), "show", "RE-STORY-ZZZZZZ"]) == 4
     assert "E-ID-UNKNOWN" in capsys.readouterr().err
 
 
@@ -253,7 +253,7 @@ def test_show_multi_unknown_id_aborts_before_output(
 ) -> None:
     root = sample_graph.root
     story = sample_graph.ids["story"]
-    assert main(["--repo", str(root), "show", story, "RE-NOSUCH"]) == 4
+    assert main(["--repo", str(root), "show", story, "RE-STORY-ZZZZZZ"]) == 4
     captured = capsys.readouterr()
     assert "E-ID-UNKNOWN" in captured.err
     assert story not in captured.out

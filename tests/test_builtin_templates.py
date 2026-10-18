@@ -114,7 +114,7 @@ EXPECTED_SECTIONS: dict[str, list[tuple[str, bool]]] = {
 
 DUMMY_VARS: dict[str, object] = {
     "title": "Dummy title",
-    "id": "RE-000000",
+    "id": "RE-STORY-000000",
     "type": "user-story",
     "kind": "requirement",
     "created": "2026-01-01T00:00:00Z",

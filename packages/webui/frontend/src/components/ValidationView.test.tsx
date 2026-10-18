@@ -6,8 +6,8 @@ import type { ValidationResponse } from "../api/types";
 
 const response: ValidationResponse = {
   findings: [
-    { code: "E-CYCLE", severity: "E", message: "Cycle found.", doc_id: "RE-AAAAAA", path: null, fix: "Remove an edge." },
-    { code: "W-ORPHAN", severity: "W", message: "Orphan.", doc_id: "RE-BBBBBB", path: null, fix: null },
+    { code: "E-CYCLE", severity: "E", message: "Cycle found.", doc_id: "RE-FEAT-AAAAAA", path: null, fix: "Remove an edge." },
+    { code: "W-ORPHAN", severity: "W", message: "Orphan.", doc_id: "RE-GOAL-BBBBBB", path: null, fix: null },
   ],
   error_count: 1,
   warning_count: 1,
@@ -43,9 +43,9 @@ describe("ValidationView subjects", () => {
     const { onSelect } = renderView();
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: "Open RE-AAAAAA" }));
+    await user.click(screen.getByRole("button", { name: "Open RE-FEAT-AAAAAA" }));
 
-    expect(onSelect).toHaveBeenCalledWith("RE-AAAAAA");
+    expect(onSelect).toHaveBeenCalledWith("RE-FEAT-AAAAAA");
   });
 
   it("shows a path finding as escaped text with no link and no document action", async () => {
